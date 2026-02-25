@@ -4,9 +4,12 @@ FROM python:3.10-slim as builder
 WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y build-essential libgeos-dev
+RUN apt-get update && apt-get install -y build-essential libgeos-dev && rm -rf /var/lib/apt/lists/*
 
-# Install CPU-only PyTorch first to save massive space (4GB+)
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install CPU-only PyTorch first
 RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 # Install remaining requirements
@@ -32,7 +35,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY . .
 
-# Set environment variable to force CPU mode for AI
+# Set environment variable to force CPU mode
 ENV ONNXRUNTIME_EXECUTION_MODE=CPU
 ENV PORT=8000
 

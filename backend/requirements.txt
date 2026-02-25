@@ -15,5 +15,4 @@ pandas==2.2.0
 python-dotenv==1.0.1
 python-jose[cryptography]
 passlib[bcrypt]
-ultralytics==8.1.0 --no-deps 
-# The --no-deps ensures it uses the CPU torch we installed manually
+ultralytics==8.1.0
