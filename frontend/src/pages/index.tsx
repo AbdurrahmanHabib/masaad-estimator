@@ -3,43 +3,117 @@ import Link from 'next/link';
 
 export default function Dashboard() {
   return (
-    <div style={{ backgroundColor: '#020617', minHeight: '100vh', color: '#f8fafc', display: 'flex' }}>
+    <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
       
       {/* SIDEBAR */}
-      <div style={{ width: '256px', backgroundColor: '#0f172a', borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+      <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between">
         <div>
-          <div style={{ padding: '24px', borderBottom: '1px solid #1e293b', textAlign: 'center' }}>
-            <img src="/logo.png" alt="Madinat Al Saada" style={{ height: '64px', margin: '0 auto 16px auto', objectFit: 'contain' }} />
-            <h1 style={{ fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#ffffff' }}>Madinat Al Saada</h1>
-            <p style={{ fontSize: '10px', color: '#10b981', fontFamily: 'monospace', marginTop: '8px' }}>ESTIMATOR_PRO_V2.1_CACHE_BUSTER</p>
+          <div className="p-6 border-b border-slate-800 text-center">
+            <img src="/logo.png" alt="Madinat Al Saada" className="h-16 mx-auto mb-4 object-contain" />
+            <h1 className="text-sm font-bold uppercase tracking-widest text-white leading-tight">Madinat Al Saada<br/>Aluminium & Glass</h1>
+            <p className="text-[10px] text-ms-emerald font-mono mt-2 uppercase tracking-tighter">ESTIMATOR_PRO_v2.5</p>
           </div>
-          <nav style={{ padding: '16px' }}>
-            <Link href="/" style={{ display: 'block', padding: '12px 16px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#34d399', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textDecoration: 'none' }}>
+          <nav className="p-4 space-y-2">
+            <Link href="/" className="block px-4 py-3 bg-ms-emerald/10 text-ms-emerald rounded border border-ms-emerald/20 text-xs font-bold uppercase tracking-wider">
               Dashboard
+            </Link>
+            <Link href="/estimate/new" className="block px-4 py-3 hover:bg-slate-800 text-slate-400 hover:text-white rounded text-xs font-bold uppercase tracking-wider transition-all border border-transparent hover:border-slate-700">
+              + New Estimate
+            </Link>
+            <Link href="/archive" className="block px-4 py-3 hover:bg-slate-800 text-slate-400 hover:text-white rounded text-xs font-bold uppercase tracking-wider transition-all border border-transparent hover:border-slate-700">
+              Project Archive
+            </Link>
+            <Link href="/settings" className="block px-4 py-3 hover:bg-slate-800 text-slate-400 hover:text-white rounded text-xs font-bold uppercase tracking-wider transition-all border border-transparent hover:border-slate-700">
+              Market Settings
             </Link>
           </nav>
         </div>
-        <div style={{ padding: '24px', borderTop: '1px solid #1e293b' }}>
-          <p style={{ fontSize: '9px', color: '#475569', textAlign: 'center', textTransform: 'uppercase' }}>
-            System Architecture by <br/><span style={{ color: '#94a3b8', fontWeight: 'bold' }}>Masaad</span>
+        <div className="p-6 border-t border-slate-800">
+          <p className="text-[9px] text-slate-600 font-mono text-center uppercase tracking-widest leading-relaxed">
+            System Architecture by <br/><span className="text-slate-400 font-bold tracking-widest">MASAAD</span>
           </p>
         </div>
       </div>
 
-      {/* MAIN CONTENT */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <header style={{ height: '64px', backgroundColor: 'rgba(15, 23, 42, 0.8)', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 40px' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 300, fontStyle: 'italic' }}>Industrial_Mission_Control</h2>
-          <div style={{ fontSize: '10px', color: '#64748b' }}>
-            BUILD_SYNC_TIME: {new Date().toLocaleTimeString()}
+      {/* MAIN CONTENT AREA */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* TOP HEADER */}
+        <header className="h-16 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-10">
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-light tracking-wide text-slate-300 italic">Mission_Control</h2>
+            <span className="px-2 py-0.5 bg-slate-800 text-[8px] font-bold text-slate-500 rounded uppercase tracking-widest">Operations_Centre_Ajman</span>
+          </div>
+          <div className="flex items-center gap-6 text-[10px] font-mono text-slate-500">
+            <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-ms-emerald animate-pulse shadow-[0_0_10px_#10b981]"></span> SYSTEM: ONLINE</span>
+            <span className="opacity-30">|</span>
+            <span>LME_ALUM: <span className="text-white font-bold">$2,485.50/MT</span></span>
           </div>
         </header>
 
-        <main style={{ flex: 1, padding: '40px' }}>
-           <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', padding: '32px', borderRadius: '8px', textAlign: 'center' }}>
-              <h1 style={{ fontSize: '48px', fontWeight: 900, color: '#dc2626', textTransform: 'uppercase' }}>Update_Verified</h1>
-              <p style={{ color: '#94a3b8', fontSize: '12px', marginTop: '16px' }}>If you see this dark screen, we have successfully bypassed the cache.</p>
-           </div>
+        {/* DASHBOARD CONTENT */}
+        <main className="flex-1 overflow-y-auto p-10 bg-slate-950">
+          {/* Global Efficiency Stats */}
+          <div className="grid grid-cols-3 gap-8 mb-10">
+            <div className="bg-slate-900 border border-slate-800 p-8 rounded-sm shadow-2xl relative group hover:border-ms-emerald/30 transition-all">
+              <h3 className="text-[10px] text-slate-500 uppercase tracking-[0.2em] mb-4">Active Estimations</h3>
+              <p className="text-5xl font-mono text-white tracking-tighter">04</p>
+              <div className="absolute bottom-4 right-8 text-[8px] font-bold text-ms-emerald uppercase opacity-40 italic">Real-Time</div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-8 rounded-sm shadow-2xl relative group hover:border-ms-emerald/30 transition-all">
+              <h3 className="text-[10px] text-slate-500 uppercase tracking-[0.2em] mb-4">Pending Pipeline (AED)</h3>
+              <p className="text-5xl font-mono text-ms-emerald tracking-tighter">2.4M</p>
+              <div className="absolute bottom-4 right-8 text-[8px] font-bold text-ms-emerald uppercase opacity-40 italic">Margin_Locked</div>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 p-8 rounded-sm shadow-2xl relative group hover:border-ms-emerald/30 transition-all">
+              <h3 className="text-[10px] text-slate-500 uppercase tracking-[0.2em] mb-4">Factory Efficiency</h3>
+              <p className="text-5xl font-mono text-white tracking-tighter">96.8%</p>
+              <div className="absolute bottom-4 right-8 text-[8px] font-bold text-ms-emerald uppercase opacity-40 italic">Scrap_Minimized</div>
+            </div>
+          </div>
+
+          {/* Project Deployment Queue */}
+          <div className="bg-slate-900 border border-slate-800 rounded-sm shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-800 bg-slate-900/80 flex justify-between items-center">
+              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-300 italic">Project_Quantification_Queue</h3>
+              <span className="text-[9px] font-bold text-slate-600 uppercase tracking-[0.3em]">Last Sync: {new Date().toLocaleTimeString()}</span>
+            </div>
+            <table className="w-full text-left">
+              <thead className="bg-slate-950/50 text-slate-500 uppercase text-[9px] font-bold tracking-[0.1em]">
+                <tr>
+                  <th className="px-8 py-4">Project_Ref</th>
+                  <th className="px-8 py-4">Primary_Client</th>
+                  <th className="px-8 py-4">Region</th>
+                  <th className="px-8 py-4">Status</th>
+                  <th className="px-8 py-4 text-right">Verification</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50 font-mono text-xs">
+                <tr className="hover:bg-ms-emerald/[0.03] transition-colors group">
+                  <td className="px-8 py-5 text-ms-emerald font-bold">PRJ-KAB-001</td>
+                  <td className="px-8 py-5 text-slate-200 font-bold uppercase tracking-tight italic">Al Kabir Tower</td>
+                  <td className="px-8 py-5 text-slate-500 uppercase tracking-tighter">Kabul_Afghanistan</td>
+                  <td className="px-8 py-5">
+                    <span className="px-3 py-1 bg-ms-emerald/10 text-ms-emerald border border-ms-emerald/20 text-[9px] font-black uppercase tracking-widest rounded-sm shadow-lg shadow-ms-emerald/5">In_Quantification</span>
+                  </td>
+                  <td className="px-8 py-5 text-right">
+                    <Link href="/estimate/PRJ-KAB-001" className="text-[10px] bg-slate-800 hover:bg-ms-emerald px-5 py-2.5 text-slate-300 hover:text-black transition-all uppercase font-black tracking-tighter rounded-sm border border-slate-700 hover:border-ms-emerald">
+                      Launch_Audit
+                    </Link>
+                  </td>
+                </tr>
+                {/* Additional Row for density */}
+                <tr className="hover:bg-ms-emerald/[0.03] transition-colors opacity-40 group grayscale">
+                  <td className="px-8 py-5 text-slate-500">PRJ-DXB-042</td>
+                  <td className="px-8 py-5 text-slate-500 font-bold uppercase tracking-tight italic">Dubai Hills Villa</td>
+                  <td className="px-8 py-5 text-slate-600 uppercase">Dubai_UAE</td>
+                  <td className="px-8 py-5">
+                    <span className="px-3 py-1 bg-slate-800 text-slate-600 text-[9px] font-bold uppercase tracking-widest rounded-sm">Completed</span>
+                  </td>
+                  <td className="px-8 py-5 text-right font-mono text-[9px]">Archive_Only</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </main>
       </div>
     </div>
