@@ -12,9 +12,17 @@ class Database:
         self.pool = None
 
     async def connect(self):
-        # Placeholder connection string
+        # Prioritize Railway/Production DATABASE_URL
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            database_url = "postgresql://user:pass@localhost/masaad"
+            
+        # Railway URLs often start with postgres://, but asyncpg needs postgresql://
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+
         self.pool = await asyncpg.create_pool(
-            dsn=os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/masaad"),
+            dsn=database_url,
             min_size=5,
             max_size=20
         )
