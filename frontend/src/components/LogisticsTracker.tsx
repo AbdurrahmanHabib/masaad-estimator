@@ -34,7 +34,7 @@ const LogisticsTracker = ({ floors = 12 }: { floors?: number }) => {
               return (
                 <tr key={floorNum}>
                   <td className="p-2 border border-slate-800 bg-slate-950 text-[10px] font-mono font-bold text-slate-500 text-center">
-                    F{String(floorNum).zfill(2)}
+                    F{String(floorNum).padStart(2, '0')}
                   </td>
                   {elevations.map(e => (
                     <td key={`${floorNum}-${e}`} className="p-1 border border-slate-800 bg-slate-950/20 group cursor-pointer hover:bg-emerald-500/10 transition-colors">
@@ -69,13 +69,6 @@ const LogisticsTracker = ({ floors = 12 }: { floors?: number }) => {
       </div>
     </div>
   );
-};
-
-// Helper for padding numbers in JSX
-String.prototype.zfill = function(size: number) {
-    let s = this;
-    while (s.length < size) s = "0" + s;
-    return s;
 };
 
 export default LogisticsTracker;
