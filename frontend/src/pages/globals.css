@@ -1,3 +1,10 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-ms-dark text-slate-100;
+    font-feature-settings: "tnum"; /* Forced Tabular Numbers for precise data alignment */
+  }
+}
