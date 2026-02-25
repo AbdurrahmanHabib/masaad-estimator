@@ -1,71 +1,57 @@
-from ortools.sat.python import cp_model
+from ortools.linear_solver import pywraplp
 from typing import List, Dict, Any
+import math
 
 class OptimizationEngine:
     """
-    1D Cutting Stock Optimizer for Madinat Al Saada Factory Floor.
-    Calculates minimum 6m bars required and exact cut patterns.
+    1D/2D Nesting for Madinat Al Saada Factory.
+    Minimizes aluminum and sheet scrap.
     """
-    def __init__(self, kerf_mm: float = 5.0):
+    def __init__(self, kerf_mm: float = 5.0, acp_return_mm: float = 50.0):
         self.kerf = kerf_mm
+        self.acp_return = acp_return_mm
 
-    def solve_1d_csp(self, demands: List[float], stock_length: float = 6000.0) -> Dict[str, Any]:
-        model = cp_model.CpModel()
-        
-        # Max theoretical bars (worst case: one bar per cut)
+    def solve_1d_aluminum(self, demands: List[float], stock_length: float = 6000.0) -> Dict[str, Any]:
+        """OR-Tools Bin Packing for extrusions."""
+        solver = pywraplp.Solver.CreateSolver('SCIP')
         num_items = len(demands)
-        num_bars = num_items
-        
-        # Variables: x[i, j] = 1 if item i is cut from bar j
+        num_bins = num_items # Worst case
+
         x = {}
         for i in range(num_items):
-            for j in range(num_bars):
-                x[i, j] = model.NewBoolVar(f'x_{i}_{j}')
-        
-        # y[j] = 1 if bar j is used
-        y = [model.NewBoolVar(f'y_{j}') for j in range(num_bars)]
-        
-        # Constraints: Each item must be cut exactly once
+            for j in range(num_bins):
+                x[i, j] = solver.IntVar(0, 1, f'x_{i}_{j}')
+        y = [solver.IntVar(0, 1, f'y_{j}') for j in range(num_bins)]
+
         for i in range(num_items):
-            model.Add(sum(x[i, j] for j in range(num_bars)) == 1)
+            solver.Add(sum(x[i, j] for j in range(num_bins)) == 1)
+        for j in range(num_bins):
+            solver.Add(sum(x[i, j] * (demands[i] + self.kerf) for i in range(num_items)) <= stock_length * y[j])
+
+        solver.Minimize(sum(y[j] for j in range(num_bins)))
+        status = solver.Solve()
+
+        if status == pywraplp.Solver.OPTIMAL:
+            return {"total_bars": sum(int(y[j].solution_value()) for j in range(num_bins))}
+        return {"error": "Optimization Failed"}
+
+    def solve_2d_acp(self, panels: List[Dict[str, float]], sheet_dim: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Calculates sheet count with 50mm folding return allowance.
+        """
+        # Add 50mm to ALL 4 SIDES (+100mm to W and H)
+        total_used_area = 0
+        for p in panels:
+            effective_w = p['w'] + (2 * self.acp_return)
+            effective_h = p['h'] + (2 * self.acp_return)
+            total_used_area += (effective_w * effective_h)
             
-        # Constraints: Total length in each bar must not exceed capacity
-        for j in range(num_bars):
-            # Sum of (length + kerf) <= stock_length * y[j]
-            # Note: We subtract one kerf at the end because the last cut doesn't waste material 
-            # unless we count end-trims. For simplicity, we add kerf to all and check against stock.
-            item_usage = sum(x[i, j] * (demands[i] + self.kerf) for i in range(num_items))
-            model.Add(item_usage <= stock_length * y[j])
-            
-        # Objective: Minimize bars used
-        model.Minimize(sum(y[j] for j in range(num_bars)))
+        sheet_area = sheet_dim['w'] * sheet_dim['h']
+        # Conservative FFDH estimate for sheets
+        required_sheets = math.ceil((total_used_area / sheet_area) * 1.15) # 15% safety for geometry
         
-        solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = 15.0
-        status = solver.Solve(model)
-        
-        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-            bars_used = []
-            for j in range(num_bars):
-                if solver.Value(y[j]):
-                    items = [demands[i] for i in range(num_items) if solver.Value(x[i, j])]
-                    total_len = sum(items) + (len(items) * self.kerf)
-                    bars_used.append({
-                        "bar_id": j + 1,
-                        "cuts": items,
-                        "waste_mm": round(stock_length - total_len, 2)
-                    })
-            
-            total_req_meters = sum(demands) / 1000
-            total_purchased_meters = (len(bars_used) * stock_length) / 1000
-            scrap_pct = ((total_purchased_meters - total_req_meters) / total_purchased_meters) * 100
-            
-            return {
-                "total_bars": len(bars_used),
-                "total_linear_meters_req": round(total_req_meters, 2),
-                "total_meters_purchased": round(total_purchased_meters, 2),
-                "scrap_percentage": round(scrap_pct, 2),
-                "cutting_list": bars_used
-            }
-        
-        return {"error": "Optimization Solver Failed"}
+        return {
+            "total_sheets": required_sheets,
+            "net_area_sqm": round(total_used_area / 1e6, 2),
+            "waste_pct": round((1 - (total_used_area / (required_sheets * sheet_area))) * 100, 2)
+        }

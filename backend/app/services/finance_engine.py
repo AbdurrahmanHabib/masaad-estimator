@@ -5,31 +5,27 @@ logger = logging.getLogger("masaad-api")
 
 class FinanceEngine:
     """
-    Dynamic Finance Engine linked to SaaS configuration.
-    Calculates project-specific rates based on uploaded operational data.
+    Direct Profit Protection Engine.
+    Calculates the True Burdened Rate from dynamic operational data.
     """
     def __init__(self, db_pool=None):
         self.db = db_pool
 
-    async def calculate_burdened_rate(self, payroll_data: Dict[str, float], admin_expenses: float) -> float:
+    async def calculate_burdened_rate(self, total_factory_payroll: float, total_madinat_admin: float, factory_headcount: int) -> float:
         """
-        True_Hourly_Rate = (Monthly_Payroll + Monthly_Admin_Expenses) / (Headcount * 260 Hours)
-        payroll_data: {"factory_payroll": float, "headcount": int}
+        True_Hourly_Rate = (Total_Factory_Payroll + Total_Madinat_Admin) / (Factory_Headcount * 208 Hours)
         """
-        factory_payroll = payroll_data.get("factory_payroll", 0.0)
-        headcount = payroll_data.get("headcount", 0)
-        
-        if headcount == 0:
+        if factory_headcount == 0:
             return 0.0
             
-        # 260 Hours assumes 10 hours/day * 26 days (standard UAE industrial month)
-        total_monthly_burden = factory_payroll + admin_expenses
-        true_hourly_rate = total_monthly_burden / (headcount * 260)
+        # 208 Hours = 8 hours/day * 26 days (Standard UAE labor month)
+        total_monthly_entity_cost = total_factory_payroll + total_madinat_admin
+        true_hourly_rate = total_monthly_entity_cost / (factory_headcount * 208)
         
         return round(true_hourly_rate, 2)
 
-    def calculate_material_tonnage_cost(self, weight_kg: float, lme_usd: float, billet_premium_usd: float) -> float:
-        """Calculates landed material cost in AED."""
-        usd_aed = 3.6725
-        rate_per_kg = ((lme_usd + billet_premium_usd) * usd_aed) / 1000
-        return round(weight_kg * rate_per_kg, 2)
+    def apply_margins(self, direct_cost: float, profit_pct: float) -> float:
+        """
+        Final Sell Price: Only applied AFTER all true burdened costs are established.
+        """
+        return round(direct_cost * (1 + (profit_pct / 100)), 2)
