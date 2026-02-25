@@ -26,8 +26,10 @@ const EstimatePage = () => {
   const { boq, status, setBOQ } = useEstimateStore();
   const [progress, setProgress] = useState(0);
   const [workbench, setWorkbench] = useState<'BOQ' | 'OPTIMIZATION' | 'STRUCTURAL'>('BOQ');
+  const [marketUpdatedDate, setMarketUpdatedDate] = useState<string | null>(null);
 
   useEffect(() => {
+    setMarketUpdatedDate(new Date().toLocaleDateString());
     if (!id) return;
     const timer = setInterval(() => {
       setProgress(prev => {
@@ -75,7 +77,7 @@ const EstimatePage = () => {
     return () => clearInterval(timer);
   }, [id, setBOQ]);
 
-  if (status !== 'COMPLETE') {
+  if (status !== 'COMPLETE' || !boq) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-ms-dark p-20">
         <div className="w-full max-w-md space-y-4">
@@ -183,7 +185,7 @@ const EstimatePage = () => {
                   <Activity size={12} className="text-ms-emerald opacity-50" />
                 </div>
                 <div className="text-3xl font-mono text-ms-emerald font-black tabular-nums tracking-tighter">
-                  AED {boq.true_shop_rate?.toFixed(2) || '48.75'}
+                  AED {(boq.true_shop_rate || 48.75).toFixed(2)}
                 </div>
                 <p className="text-[7px] text-slate-600 mt-2 uppercase font-mono">Real-time burdened labor index</p>
               </div>
@@ -194,9 +196,9 @@ const EstimatePage = () => {
                   <DollarSign size={12} className="text-ms-emerald opacity-50" />
                 </div>
                 <div className="text-3xl font-mono text-white font-black tabular-nums tracking-tighter">
-                  AED {boq.total_price_aed?.toLocaleString()}
+                  AED {boq.total_price_aed?.toLocaleString() || '0.00'}
                 </div>
-                <p className="text-[7px] text-slate-600 mt-2 uppercase font-mono italic">Market updated: {new Date().toLocaleDateString()}</p>
+                <p className="text-[7px] text-slate-600 mt-2 uppercase font-mono italic">Market updated: {marketUpdatedDate || 'Updating...'}</p>
               </div>
             </div>
 
@@ -222,7 +224,7 @@ const EstimatePage = () => {
           <div className="flex flex-col">
             <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Aggregate_Sell_Price</span>
             <span className="text-md font-mono text-ms-emerald font-black tabular-nums tracking-tighter">
-              AED {boq.total_price_aed?.toLocaleString()}
+              AED {boq.total_price_aed?.toLocaleString() || '0.00'}
             </span>
           </div>
           

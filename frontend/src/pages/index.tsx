@@ -2,6 +2,12 @@ import React from 'react';
 import Link from 'next/link';
 
 export default function Dashboard() {
+  const [lastSyncTime, setLastSyncTime] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setLastSyncTime(new Date().toLocaleTimeString());
+  }, []);
+
   return (
     <div className="flex-1 overflow-y-auto p-10 bg-ms-dark">
       {/* Global Efficiency Stats */}
@@ -25,10 +31,11 @@ export default function Dashboard() {
 
       {/* Project Deployment Queue */}
       <div className="bg-ms-panel border border-ms-border rounded-sm shadow-2xl overflow-hidden">
-        <div className="p-5 border-b border-ms-border bg-ms-panel/80 flex justify-between items-center">
-          <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-300 italic">Project_Quantification_Queue</h3>
-          <span className="text-[9px] font-bold text-slate-600 uppercase tracking-[0.3em]">Last Sync: {new Date().toLocaleTimeString()}</span>
-        </div>
+                    <div className="p-5 border-b border-ms-border bg-ms-panel/80 flex justify-between items-center">
+                      <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-300 italic">Project_Quantification_Queue</h3>
+                      <span className="text-[9px] font-bold text-slate-600 uppercase tracking-[0.3em]">Last Sync: {lastSyncTime || 'Synchronizing...'}</span>
+                    </div>
+        
         <table className="w-full text-left">
           <thead className="bg-ms-dark/50 text-slate-500 uppercase text-[9px] font-bold tracking-[0.1em]">
             <tr>
