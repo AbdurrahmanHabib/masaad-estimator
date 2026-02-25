@@ -4,12 +4,13 @@ import InteractiveBOQ from '../../components/InteractiveBOQ';
 import VarianceAlerts from '../../components/VarianceAlerts';
 import QuantificationAuditor from '../../components/QuantificationAuditor';
 import StructuralInsight from '../../components/StructuralInsight';
+import ExportCenter from '../../components/ExportCenter';
 import { useEstimateStore } from '../../store/useEstimateStore';
 
 const EstimatePage = () => {
   const router = useRouter();
   const { id } = router.query;
-  const { boq, variances, status, setBOQ } = useEstimateStore();
+  const { boq, status, setBOQ } = useEstimateStore();
   const [progress, setProgress] = useState(0);
   const [view, setView] = useState<'COMMERCIAL' | 'ENGINEERING'>('COMMERCIAL');
 
@@ -20,6 +21,10 @@ const EstimatePage = () => {
         if (prev >= 100) {
           clearInterval(timer);
           setBOQ({
+            id: id,
+            name: "AL KABIR TOWER - PHASE 1",
+            location: "Kabul, Afghanistan (Export)",
+            lme_ref: 2485.50,
             total_price_aed: 1250450.00,
             client_summary: { lme_reference_usd_mt: 2485.50 },
             line_items: [
@@ -39,72 +44,65 @@ const EstimatePage = () => {
               ixx_prov: 95.8
             },
             variances: [
-              "SAFETY_OVERRIDE: Structural failure detected on North Elevation Mullions (Span 3800mm). Required Ixx 112.5cm4 > Provided 95.8cm4. AI upgraded to GULF-EXT-7002-HD.",
-              "RFI_WARNING: Discrepancy detected between Architectural Window Schedule (Sheet A-102) and BOQ Quantity for Type W-04."
+              "SAFETY_OVERRIDE: Structural failure detected on North Elevation Mullions. AI upgraded to GULF-EXT-7002-HD.",
+              "RFI_WARNING: Discrepancy detected in W-04 Quantities."
             ]
           });
           return 100;
         }
         return prev + 10;
       });
-    }, 300);
+    }, 200);
     return () => clearInterval(timer);
   }, [id, setBOQ]);
 
   return (
-    <div className="min-h-screen bg-black text-slate-200 flex flex-col font-sans">
-      <header className="h-16 border-b border-slate-900 flex items-center justify-between px-8 bg-slate-950">
-        <div className="flex items-center gap-4">
-          <div className="w-8 h-8 bg-emerald-500 rounded-sm flex items-center justify-center font-black text-black text-xs">M</div>
-          <h1 className="font-bold text-xs tracking-widest uppercase">Masaad Estimator <span className="text-slate-700 ml-2">PROD_v1.0</span></h1>
+    <div className="min-h-screen bg-ms-bg flex flex-col font-sans selection:bg-ms-glass/20">
+      <header className="h-20 bg-white/90 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-10 z-50">
+        <div className="flex items-center gap-5">
+          <img src="/logo.jpeg" alt="Logo" className="h-8 w-auto object-contain" />
+          <div className="h-6 w-[1px] bg-slate-200"></div>
+          <div className="flex flex-col">
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-ms-primary">Al Kabir Tower</span>
+            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Kabul, AF // Estimation_Audit</span>
+          </div>
         </div>
-        <div className="flex bg-slate-900 p-1 rounded">
-          <button 
-            onClick={() => setView('COMMERCIAL')}
-            className={`px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded transition-all ${view === 'COMMERCIAL' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            Commercial_View
-          </button>
-          <button 
-            onClick={() => setView('ENGINEERING')}
-            className={`px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded transition-all ${view === 'ENGINEERING' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            Engineering_View
-          </button>
+        
+        <div className="flex bg-slate-100 p-1 rounded-sm">
+          <button onClick={() => setView('COMMERCIAL')} className={`px-6 py-2 text-[9px] font-black uppercase tracking-widest rounded-sm transition-all ${view === 'COMMERCIAL' ? 'bg-ms-primary text-white shadow-lg shadow-ms-primary/20' : 'text-slate-400'}`}>Commercial</button>
+          <button onClick={() => setView('ENGINEERING')} className={`px-6 py-2 text-[9px] font-black uppercase tracking-widest rounded-sm transition-all ${view === 'ENGINEERING' ? 'bg-ms-primary text-white shadow-lg shadow-ms-primary/20' : 'text-slate-400'}`}>Engineering</button>
         </div>
       </header>
 
       <main className="flex-1 flex overflow-hidden relative">
-        <div className="flex-1 p-10 overflow-y-auto">
+        <div className="flex-1 p-12 overflow-y-auto">
           {status !== 'COMPLETE' ? (
-            <div className="max-w-xl mx-auto space-y-6 pt-32">
-              <div className="h-[1px] bg-slate-900 w-full"><div className="h-full bg-emerald-500 transition-all duration-700" style={{ width: `${progress}%` }}></div></div>
-              <p className="text-center text-slate-600 text-[9px] font-mono animate-pulse uppercase tracking-widest">Running_Neuro_Symbolic_Quantification...</p>
+            <div className="max-w-xl mx-auto pt-40 space-y-6">
+              <div className="h-[2px] bg-slate-100 w-full"><div className="h-full bg-ms-glass transition-all duration-500" style={{ width: `${progress}%` }}></div></div>
+              <p className="text-center text-slate-400 text-[9px] font-mono animate-pulse uppercase tracking-[0.3em]">Processing_Shop_Drawings_&_BOM...</p>
             </div>
           ) : (
-            <div className="max-w-6xl mx-auto pb-20">
-              <div className="mb-10">
-                <h2 className="text-4xl font-black uppercase tracking-tighter italic">{view === 'COMMERCIAL' ? 'Project_Financials' : 'Engineering_Audit'}</h2>
-                <p className="text-slate-600 text-[9px] font-mono mt-2 uppercase tracking-widest">AL_KABIR_TOWER_VERIFICATION | AJMAN_UAE</p>
-              </div>
-
+            <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
               {view === 'COMMERCIAL' ? <InteractiveBOQ /> : (
-                <div className="animate-in fade-in duration-500">
+                <>
                   <QuantificationAuditor data={boq.audit} />
                   <StructuralInsight audit={boq.audit} />
-                </div>
+                </>
               )}
             </div>
           )}
         </div>
-        <VarianceAlerts variances={boq?.variances || []} />
 
-        {/* Masaad Watermark */}
-        <footer className="absolute bottom-6 left-10 pointer-events-none opacity-20">
-            <div className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
-                Madinat Al Saada Aluminium & Glass Works LLC
-            </div>
-        </footer>
+        {/* Right Sidebar Controllers */}
+        <div className="flex flex-col border-l border-slate-100 h-full">
+            <VarianceAlerts variances={boq?.variances || []} />
+            <ExportCenter project_id={id as string} />
+        </div>
+
+        {/* System Watermark */}
+        <div className="absolute bottom-8 left-12 text-[8px] font-mono text-slate-300 uppercase tracking-[0.2em] pointer-events-none">
+          Architecture by Masaad // Madinat Al Saada Corp.
+        </div>
       </main>
     </div>
   );
