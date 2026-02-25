@@ -3,15 +3,22 @@
 @tailwind utilities;
 
 @layer base {
-  html, body {
-    @apply bg-ms-dark text-slate-100 min-h-screen overflow-x-hidden;
-    font-family: 'JetBrains Mono', monospace;
-    font-feature-settings: "tnum";
+  body {
+    @apply bg-ms-bg text-ms-dark antialiased;
+    font-family: 'Inter', sans-serif;
   }
 }
 
 @layer components {
-  .ms-button-primary {
-    @apply py-5 bg-ms-emerald hover:bg-emerald-500 text-black font-black uppercase text-sm tracking-widest transition-all rounded-sm shadow-lg shadow-emerald-500/10 text-center;
+  .glass-panel {
+    @apply bg-white/80 backdrop-blur-md border border-slate-200 shadow-sm;
+  }
+  
+  .tech-data {
+    @apply font-mono tabular-nums;
+  }
+
+  .nav-link {
+    @apply text-xs font-bold uppercase tracking-widest text-ms-primary hover:text-ms-glass transition-colors;
   }
 }

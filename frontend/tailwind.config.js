@@ -1,19 +1,17 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: [
-    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
-  ],
+  content: ["./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
       colors: {
-        'ms-dark': '#020617',
-        'ms-panel': '#0f172a',
-        'ms-emerald': '#10b981',
-        'ms-slate': '#94a3b8',
+        'ms-primary': '#2C3E50',   // Deep Gunmetal (Material Strength)
+        'ms-glass': '#0077B6',     // Ocean Blue (Glass Tint)
+        'ms-accent': '#E67E22',    // Industrial Orange (Action)
+        'ms-bg': '#F8F9FA',        // Architectural White (Cleanliness)
+        'ms-dark': '#1A1A1A',      // Industrial Dark
       },
       fontFamily: {
+        sans: ['"Inter"', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
       },
     },
