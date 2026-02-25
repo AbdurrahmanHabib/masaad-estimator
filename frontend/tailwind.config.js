@@ -4,19 +4,20 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        'ms-dark': '#020617',    // Slate-950
-        'ms-panel': '#0f172a',   // Slate-900
-        'ms-border': '#1e293b',  // Slate-800
-        'ms-emerald': '#10b981', // Emerald-500
-        'ms-amber': '#fbbf24',   // Amber-400 (Adjusted per requirement)
-        'ms-slate-800': '#1e293b',
+        'ms-bg': '#f8fafc',      // Light Slate background
+        'ms-sidebar': '#1e293b',  // Dark Navy sidebar
+        'ms-primary': '#2563eb',  // Vibrant Blue
+        'ms-emerald': '#10b981', // Vibrant Green
+        'ms-red': '#ef4444',     // Vibrant Red
+        'ms-amber': '#f59e0b',   // Vibrant Amber
+        'ms-border': '#e2e8f0',  // Light border
       },
       fontFamily: {
         sans: ['"Inter"', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
       },
-      fontSize: {
-        'xxs': '0.65rem',
+      boxShadow: {
+        'erp': '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
       }
     },
   },
