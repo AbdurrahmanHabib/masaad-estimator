@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import asyncpg
 from contextlib import asynccontextmanager
 
+from app.api.settings_routes import router as settings_router
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("masaad-api")
@@ -73,6 +75,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(settings_router)
 
 @app.get("/health")
 async def health_check():
