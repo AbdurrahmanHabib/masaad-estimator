@@ -1,26 +1,28 @@
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 class PhysicsEngine:
     """
-    Automates the 'Invisible BOQ' based on engineering dependencies.
+    Automates the 'Invisible Skeleton' quantification.
+    Maps primary detected items to their structural dependencies.
     """
-    def explode_acp_dependencies(self, net_sqm: float, linear_mtr_joints: float) -> Dict[str, Any]:
+    def generate_acp_skeleton(self, net_sqm: float, perimeter_m: float) -> Dict[str, Any]:
         """
-        Calculates sub-frames and fixings for every SQM of ACP.
+        For every SQM of ACP, calculates the sub-frame and sealing components.
         """
         return {
-            "aluminum_sub_frame_mtr": round(net_sqm * 2.8, 2), # Based on 600mm grid
-            "fixing_brackets": round(net_sqm * 4.5, 0),       # Runner/Starter brackets
-            "weather_silicone_tubes": round(linear_mtr_joints / 6.0, 0), # 6m per tube
-            "cleats_and_rivets": round(net_sqm * 12, 0)
+            "aluminum_t_profile_mtr": round(net_sqm * 1.8, 2), # Vertical Runners @ 600mm
+            "aluminum_l_angle_mtr": round(net_sqm * 1.2, 2),   # Horizontal Bracing
+            "fixing_brackets_pcs": round(net_sqm * 4.5, 0),    # Runner Brackets
+            "backer_rod_mtr": round(perimeter_m, 2),
+            "weather_silicone_tubes": round(perimeter_m / 6.0, 0) # 6m per tube
         }
 
-    def explode_mullion_dependencies(self, mullion_count: int) -> Dict[str, Any]:
+    def generate_mullion_anchor_kit(self, mullion_count: int) -> Dict[str, Any]:
         """
-        Calculates bolts and brackets per mullion connection.
+        Calculates heavy-duty anchoring for Curtain Wall mullions.
         """
         return {
-            "hilti_anchor_bolts": mullion_count * 4,
-            "ms_galvanized_brackets": mullion_count * 1,
-            "epdm_joint_gaskets": mullion_count * 0.5 # linear meters
+            "hilti_anchor_bolts": int(mullion_count * 4),
+            "ms_galvanized_brackets": int(mullion_count * 1),
+            "joint_sleeves": int(mullion_count * 0.5)
         }

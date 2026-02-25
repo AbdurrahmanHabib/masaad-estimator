@@ -4,18 +4,18 @@ import math
 
 class OptimizationEngine:
     """
-    1D/2D Nesting for Madinat Al Saada Factory.
-    Minimizes aluminum and sheet scrap.
+    Industrial Nesting Engine.
+    Minimizes scrap for Aluminum profiles and ACP sheets.
     """
     def __init__(self, kerf_mm: float = 5.0, acp_return_mm: float = 50.0):
         self.kerf = kerf_mm
         self.acp_return = acp_return_mm
 
     def solve_1d_aluminum(self, demands: List[float], stock_length: float = 6000.0) -> Dict[str, Any]:
-        """OR-Tools Bin Packing for extrusions."""
+        """OR-Tools logic to find minimum 6m bars required."""
         solver = pywraplp.Solver.CreateSolver('SCIP')
         num_items = len(demands)
-        num_bins = num_items # Worst case
+        num_bins = num_items # Upper bound
 
         x = {}
         for i in range(num_items):
@@ -32,26 +32,29 @@ class OptimizationEngine:
         status = solver.Solve()
 
         if status == pywraplp.Solver.OPTIMAL:
-            return {"total_bars": sum(int(y[j].solution_value()) for j in range(num_bins))}
-        return {"error": "Optimization Failed"}
+            total_bars = sum(int(y[j].solution_value()) for j in range(num_bins))
+            waste_pct = (1 - (sum(demands) / (total_bars * stock_length))) * 100
+            return {"total_bars": total_bars, "waste_pct": round(waste_pct, 2)}
+        return {"error": "1D_OPTIMIZATION_FAILED"}
 
     def solve_2d_acp(self, panels: List[Dict[str, float]], sheet_dim: Dict[str, float]) -> Dict[str, Any]:
         """
-        Calculates sheet count with 50mm folding return allowance.
+        2D Bin Packing for ACP with mandatory 50mm fold depth return on all sides.
         """
-        # Add 50mm to ALL 4 SIDES (+100mm to W and H)
+        sheet_area = sheet_dim['w'] * sheet_dim['h']
         total_used_area = 0
+        
         for p in panels:
+            # Add 50mm to all 4 sides (+100mm total to each dimension)
             effective_w = p['w'] + (2 * self.acp_return)
             effective_h = p['h'] + (2 * self.acp_return)
             total_used_area += (effective_w * effective_h)
             
-        sheet_area = sheet_dim['w'] * sheet_dim['h']
-        # Conservative FFDH estimate for sheets
-        required_sheets = math.ceil((total_used_area / sheet_area) * 1.15) # 15% safety for geometry
+        # Simplified nesting efficiency factor (Heuristic)
+        efficiency_factor = 1.12 # 12% extra for layout complexity
+        required_sheets = math.ceil((total_used_area / sheet_area) * efficiency_factor)
         
         return {
             "total_sheets": required_sheets,
-            "net_area_sqm": round(total_used_area / 1e6, 2),
             "waste_pct": round((1 - (total_used_area / (required_sheets * sheet_area))) * 100, 2)
         }
