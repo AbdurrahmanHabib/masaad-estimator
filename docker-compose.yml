@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: masaad_db
+    restart: always
+    environment:
+      POSTGRES_USER: masaad_admin
+      POSTGRES_PASSWORD: password123 # CHANGE THIS in your .env file
+      POSTGRES_DB: masaad_estimator
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    container_name: masaad_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://masaad_admin:password123@db:5432/masaad_estimator
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: 
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://YOUR_OCI_PUBLIC_IP:8000
+    container_name: masaad_frontend
+    restart: always
+    ports:
+      - "80:3000"
+    depends_on:
+      - backend
