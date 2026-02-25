@@ -16,3 +16,5 @@ python-dotenv==1.0.1
 python-jose[cryptography]
 passlib[bcrypt]
 ultralytics==8.1.0
+shapely==2.0.3
+pdfplumber==0.10.3

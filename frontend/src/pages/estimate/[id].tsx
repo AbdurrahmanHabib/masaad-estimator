@@ -7,7 +7,18 @@ import ExportCenter from '../../components/ExportCenter';
 import OptimizationVisualizer from '../../components/Estimator/OptimizationVisualizer';
 import StructuralChecklist from '../../components/Estimator/StructuralChecklist';
 import { useEstimateStore } from '../../store/useEstimateStore';
-import { Layers, Activity, DollarSign, ShieldAlert, Cpu, BarChart3, Box, HardHat } from 'lucide-react';
+import { 
+  Layers, 
+  Activity, 
+  DollarSign, 
+  ShieldAlert, 
+  Cpu, 
+  BarChart3, 
+  Box, 
+  HardHat,
+  TrendingUp,
+  Scale
+} from 'lucide-react';
 
 const EstimatePage = () => {
   const router = useRouter();
@@ -27,6 +38,7 @@ const EstimatePage = () => {
             name: "AL KABIR TOWER - PHASE 1",
             location: "Kabul, Afghanistan (Export)",
             lme_ref: 2485.50,
+            true_shop_rate: 48.75,
             total_price_aed: 1845600.00,
             client_summary: { lme_reference_usd_mt: 2485.50 },
             line_items: [
@@ -84,11 +96,11 @@ const EstimatePage = () => {
     <div className="flex flex-col h-full bg-ms-dark overflow-hidden">
       <div className="flex flex-1 overflow-hidden divide-x divide-ms-border">
         
-        {/* COLUMN 1: SYSTEM NAVIGATOR (20%) */}
+        {/* PANE 1: DWG LAYERS (20%) */}
         <div className="w-[20%] flex flex-col bg-ms-dark overflow-hidden">
           <div className="p-3 border-b border-ms-border flex items-center gap-2 bg-ms-panel/20">
             <Layers size={14} className="text-slate-500" />
-            <h3 className="text-[9px] font-black uppercase tracking-widest text-slate-300">System_Navigator</h3>
+            <h3 className="text-[9px] font-black uppercase tracking-widest text-slate-300 italic">DWG_Layer_Control</h3>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
             {boq.layers?.map((layer: string) => (
@@ -99,8 +111,8 @@ const EstimatePage = () => {
             ))}
           </div>
           <div className="p-3 border-t border-ms-border bg-ms-panel/10">
-            <div className="flex items-center gap-2 mb-2 text-[8px] font-bold text-slate-600 uppercase tracking-widest">
-              <Cpu size={12} /> Logic_Core_Active
+            <div className="flex items-center gap-2 mb-2 text-[8px] font-bold text-slate-600 uppercase tracking-widest italic">
+              <Cpu size={12} /> Extraction_Core
             </div>
             <div className="h-0.5 bg-ms-border rounded-full overflow-hidden">
               <div className="h-full bg-ms-emerald w-full shadow-[0_0_5px_#10b981]"></div>
@@ -108,7 +120,7 @@ const EstimatePage = () => {
           </div>
         </div>
 
-        {/* COLUMN 2: ACTIVE WORKBENCH (50%) */}
+        {/* PANE 2: ACTIVE WORKBENCH (50%) */}
         <div className="w-[50%] flex flex-col bg-ms-dark relative overflow-hidden">
           {/* WORKBENCH TOGGLE */}
           <div className="p-3 border-b border-ms-border flex justify-between items-center bg-ms-panel/40 backdrop-blur-sm sticky top-0 z-10">
@@ -117,23 +129,23 @@ const EstimatePage = () => {
                 onClick={() => setWorkbench('BOQ')} 
                 className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-[0.2em] rounded-sm transition-all flex items-center gap-2 ${workbench === 'BOQ' ? 'bg-ms-emerald text-black shadow-lg shadow-ms-emerald/10' : 'text-slate-500 hover:text-slate-300'}`}
               >
-                <BarChart3 size={12} /> BOQ_Matrix
+                <BarChart3 size={12} /> Grid_View
               </button>
               <button 
                 onClick={() => setWorkbench('OPTIMIZATION')} 
                 className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-[0.2em] rounded-sm transition-all flex items-center gap-2 ${workbench === 'OPTIMIZATION' ? 'bg-ms-emerald text-black shadow-lg shadow-ms-emerald/10' : 'text-slate-500 hover:text-slate-300'}`}
               >
-                <Box size={12} /> Nesting_2D
+                <Box size={12} /> Optimization
               </button>
               <button 
                 onClick={() => setWorkbench('STRUCTURAL')} 
                 className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-[0.2em] rounded-sm transition-all flex items-center gap-2 ${workbench === 'STRUCTURAL' ? 'bg-ms-emerald text-black shadow-lg shadow-ms-emerald/10' : 'text-slate-500 hover:text-slate-300'}`}
               >
-                <HardHat size={12} /> Structural_Audit
+                <HardHat size={12} /> Structural
               </button>
             </div>
-            <div className="text-[10px] font-mono text-ms-emerald font-black tracking-tighter">
-              PROJECT::{id}
+            <div className="text-[10px] font-mono text-ms-emerald font-black tracking-tighter italic">
+              LIVE_WORKBENCH::{id}
             </div>
           </div>
 
@@ -156,19 +168,41 @@ const EstimatePage = () => {
           </div>
         </div>
 
-        {/* COLUMN 3: FINANCIAL PULSE (30%) */}
+        {/* PANE 3: FINANCIAL PULSE SIDEBAR (30%) */}
         <div className="w-[30%] flex flex-col bg-ms-panel/10 overflow-hidden">
           <div className="p-3 border-b border-ms-border flex items-center gap-2 bg-ms-panel/30">
-            <DollarSign size={14} className="text-ms-emerald" />
-            <h3 className="text-[9px] font-black uppercase tracking-widest text-ms-emerald">Commercial_Pulse</h3>
+            <TrendingUp size={14} className="text-ms-emerald" />
+            <h3 className="text-[9px] font-black uppercase tracking-widest text-ms-emerald italic">Financial_Pulse_Center</h3>
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 space-y-6">
-            <QuantificationAuditor data={boq.audit} />
+            <div className="grid grid-cols-1 gap-4">
+              <div className="p-4 bg-ms-dark border border-ms-border rounded-sm group hover:border-ms-emerald/50 transition-all shadow-xl">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest italic">True_Shop_Rate</span>
+                  <Activity size={12} className="text-ms-emerald opacity-50" />
+                </div>
+                <div className="text-3xl font-mono text-ms-emerald font-black tabular-nums tracking-tighter">
+                  AED {boq.true_shop_rate?.toFixed(2) || '48.75'}
+                </div>
+                <p className="text-[7px] text-slate-600 mt-2 uppercase font-mono">Real-time burdened labor index</p>
+              </div>
+
+              <div className="p-4 bg-ms-dark border border-ms-border rounded-sm group hover:border-ms-emerald/50 transition-all shadow-xl">
+                <div className="flex justify-between items-center mb-3">
+                  <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest italic">Total_Project_Value</span>
+                  <DollarSign size={12} className="text-ms-emerald opacity-50" />
+                </div>
+                <div className="text-3xl font-mono text-white font-black tabular-nums tracking-tighter">
+                  AED {boq.total_price_aed?.toLocaleString()}
+                </div>
+                <p className="text-[7px] text-slate-600 mt-2 uppercase font-mono italic">Market updated: {new Date().toLocaleDateString()}</p>
+              </div>
+            </div>
 
             <div className="border-t border-ms-border pt-4">
-              <div className="flex items-center gap-2 mb-3 text-[8px] font-black text-ms-amber uppercase tracking-widest italic">
-                <ShieldAlert size={14} /> Intelligence_Variance_Reports
+              <div className="flex items-center gap-2 mb-3 text-[8px] font-black text-ms-amber uppercase tracking-widest italic underline decoration-ms-amber/30">
+                <ShieldAlert size={14} /> Logic_Variance_Reports
               </div>
               <VarianceAlerts variances={boq?.variances || []} />
             </div>
@@ -181,41 +215,42 @@ const EstimatePage = () => {
       </div>
 
       {/* STICKY PROJECT FOOTER */}
-      <footer className="h-14 bg-ms-panel border-t border-ms-emerald/30 flex items-center px-6 gap-12 z-20 shadow-[0_-10px_30px_rgba(16,185,129,0.05)] relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-[1px] bg-ms-emerald animate-pulse opacity-50"></div>
+      <footer className="h-12 bg-ms-panel border-t border-ms-emerald/30 flex items-center px-6 gap-10 z-20 relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-[1px] bg-ms-emerald animate-pulse opacity-30"></div>
         
         <div className="flex items-center gap-10 flex-1">
           <div className="flex flex-col">
-            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Total_Project_Sell_Price</span>
-            <span className="text-lg font-mono text-ms-emerald font-black tabular-nums tracking-tighter">
+            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Aggregate_Sell_Price</span>
+            <span className="text-md font-mono text-ms-emerald font-black tabular-nums tracking-tighter">
               AED {boq.total_price_aed?.toLocaleString()}
             </span>
           </div>
           
-          <div className="h-8 w-[1px] bg-ms-border"></div>
+          <div className="h-6 w-[1px] bg-ms-border"></div>
 
           <div className="flex flex-col">
-            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Total_Engineering_Mass</span>
-            <span className="text-lg font-mono text-white font-black tabular-nums tracking-tighter">
-              {(boq.audit.linear_meters * 2.4).toLocaleString()} <span className="text-[10px] text-slate-600">KG</span>
+            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Calculated_Net_Mass</span>
+            <span className="text-md font-mono text-white font-black tabular-nums tracking-tighter">
+              <Scale size={10} className="inline mr-1 text-slate-500" />
+              {(boq.audit.linear_meters * 2.45).toLocaleString(undefined, { maximumFractionDigits: 0 })} <span className="text-[8px] text-slate-600">KG</span>
             </span>
           </div>
 
-          <div className="h-8 w-[1px] bg-ms-border"></div>
+          <div className="h-6 w-[1px] bg-ms-border"></div>
 
           <div className="flex flex-col">
-            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Calculated_Net_Profit</span>
+            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Net_Profit_Percentage</span>
             <div className="flex items-baseline gap-2">
-              <span className="text-lg font-mono text-ms-emerald font-black tabular-nums tracking-tighter">22.4%</span>
-              <div className="w-12 h-1.5 bg-ms-dark border border-ms-border rounded-full overflow-hidden">
-                <div className="h-full bg-ms-emerald w-[70%]"></div>
+              <span className="text-md font-mono text-ms-emerald font-black tabular-nums tracking-tighter">24.8%</span>
+              <div className="w-10 h-1 bg-ms-dark border border-ms-border rounded-full overflow-hidden">
+                <div className="h-full bg-ms-emerald w-[75%] shadow-[0_0_5px_#10b981]"></div>
               </div>
             </div>
           </div>
         </div>
 
-        <button className="bg-ms-slate-800 hover:bg-ms-emerald hover:text-black text-ms-emerald px-6 py-2 rounded-sm text-[9px] font-black uppercase tracking-[0.2em] transition-all border border-ms-emerald/20 hover:border-ms-emerald">
-          FINAL_PROJECT_RELEASE
+        <button className="bg-ms-slate-800 hover:bg-ms-emerald hover:text-black text-ms-emerald px-5 py-1.5 rounded-sm text-[8px] font-black uppercase tracking-[0.2em] transition-all border border-ms-emerald/20 hover:border-ms-emerald">
+          FINAL_TECHNICAL_RELEASE
         </button>
       </footer>
     </div>

@@ -3,10 +3,18 @@ from pydantic import BaseModel
 import pandas as pd
 import io
 import logging
-# from app.db.session import db  # Assuming a DB pool is available
+# from app.db.session import db 
 
 router = APIRouter(prefix="/api/settings", tags=["Tenant Settings"])
 logger = logging.getLogger("masaad-api")
+
+# Persistent state for mock calculation (In production, this would be in DB)
+class GroupFinancialState:
+    total_group_overhead = 0.0
+    direct_payroll_cost = 0.0
+    active_factory_hours = 0.0
+
+fin_state = GroupFinancialState()
 
 class MarketUpdate(BaseModel):
     lme_rate: float
@@ -16,8 +24,7 @@ class MarketUpdate(BaseModel):
 @router.post("/upload-payroll")
 async def upload_payroll(file: UploadFile = File(...)):
     """
-    Ingests the monthly payroll CSV.
-    Filters by 'FACTORY' department and calculates the True Shop Rate.
+    Ingests Payroll CSV. Filters strictly for Site/Job Location == 'FACTORY'.
     """
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
@@ -25,34 +32,42 @@ async def upload_payroll(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        df.columns = df.columns.str.upper().str.replace(' ', '_')
         
-        # Ensure required columns exist
-        if not {'department', 'basic_salary', 'allowances'}.issubset(df.columns.str.lower()):
-             raise HTTPException(status_code=400, detail="CSV missing required columns: department, basic_salary, allowances")
+        # Mandatory Filter: Job Location == FACTORY
+        # Check both possible column names for robust ingestion
+        loc_col = next((c for c in ['SITE_LOCATION', 'JOB_LOCATION', 'LOCATION'] if c in df.columns), None)
+        if not loc_col:
+             raise HTTPException(status_code=400, detail="CSV missing Location column (SITE_LOCATION or JOB_LOCATION)")
         
-        # Filter for Factory Workers
-        factory_df = df[df['department'].str.upper() == 'FACTORY']
-        total_factory_workers = len(factory_df)
+        factory_df = df[df[loc_col].str.upper() == 'FACTORY']
         
-        if total_factory_workers == 0:
-            raise HTTPException(status_code=400, detail="No 'FACTORY' employees found in payroll data.")
+        if len(factory_df) == 0:
+            raise HTTPException(status_code=400, detail="No 'FACTORY' location employees found.")
             
-        total_monthly_payroll = factory_df['basic_salary'].sum() + factory_df['allowances'].sum()
+        # Calculation: Direct Payroll + Hours
+        salary_col = next((c for c in ['BASIC_SALARY', 'TOTAL_PAY', 'GROSS'] if c in df.columns), 'BASIC_SALARY')
+        hours_col = next((c for c in ['WORKING_HOURS', 'ACTIVE_HOURS', 'HOURS'] if c in df.columns), None)
         
-        # Calculate Blended Hourly Rate (Assumes 208 working hours/month + 1.35 Burden Factor)
-        avg_monthly_salary = total_monthly_payroll / total_factory_workers
-        uae_burden_factor = 1.35
-        true_shop_rate = (avg_monthly_salary * uae_burden_factor) / 208
+        fin_state.direct_payroll_cost = pd.to_numeric(factory_df[salary_col], errors='coerce').sum()
         
-        # TODO: Save to Database
-        # await db.execute("UPDATE tenant_settings SET true_shop_rate = $1, factory_headcount = $2", true_shop_rate, total_factory_workers)
+        # If hours not provided, assume standard 208 hrs/worker
+        if hours_col:
+            fin_state.active_factory_hours = pd.to_numeric(factory_df[hours_col], errors='coerce').sum()
+        else:
+            fin_state.active_factory_hours = len(factory_df) * 208
+            
+        # Calculate Burdened Rate
+        true_shop_rate = 0.0
+        if fin_state.active_factory_hours > 0:
+            true_shop_rate = (fin_state.total_group_overhead + fin_state.direct_payroll_cost) / fin_state.active_factory_hours
         
         return {
             "status": "success",
-            "message": "Payroll processed successfully.",
-            "data": {
-                "factory_headcount": total_factory_workers,
-                "total_monthly_payroll": float(total_monthly_payroll),
+            "metrics": {
+                "factory_headcount": len(factory_df),
+                "direct_payroll_cost": round(float(fin_state.direct_payroll_cost), 2),
+                "active_factory_hours": float(fin_state.active_factory_hours),
                 "true_shop_rate_aed": round(float(true_shop_rate), 2)
             }
         }
@@ -63,8 +78,7 @@ async def upload_payroll(file: UploadFile = File(...)):
 @router.post("/upload-expenses")
 async def upload_expenses(file: UploadFile = File(...)):
     """
-    Ingests the admin expenses CSV.
-    Sums the 'MADINAT' column to calculate total administrative overhead.
+    Ingests admin expenses CSV. Sums MADINAT, AL JAZEERA, and MADINAT AL JAZEERA.
     """
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
@@ -72,25 +86,20 @@ async def upload_expenses(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        df.columns = df.columns.str.upper().str.strip()
         
-        # Normalize column names to uppercase for robust matching
-        df.columns = df.columns.str.upper()
-        
-        if 'MADINAT' not in df.columns:
-            raise HTTPException(status_code=400, detail="CSV missing required column: MADINAT")
+        required_cols = ['MADINAT', 'AL JAZEERA', 'MADINAT AL JAZEERA']
+        for col in required_cols:
+            if col not in df.columns:
+                raise HTTPException(status_code=400, detail=f"CSV missing group entity column: {col}")
             
-        # Sum the Madinat column, coercing non-numeric to NaN then dropping them
-        total_admin_expenses = pd.to_numeric(df['MADINAT'], errors='coerce').sum()
-        
-        # TODO: Save to Database
-        # await db.execute("UPDATE tenant_settings SET total_admin_expenses = $1", total_admin_expenses)
+        # Unified Group Model: Sum across all 3 entities
+        fin_state.total_group_overhead = df[required_cols].apply(pd.to_numeric, errors='coerce').sum().sum()
         
         return {
             "status": "success",
-            "message": "Admin expenses processed successfully.",
-            "data": {
-                "total_admin_expenses_aed": round(float(total_admin_expenses), 2)
-            }
+            "total_group_overhead_aed": round(float(fin_state.total_group_overhead), 2),
+            "entities_aggregated": required_cols
         }
     except Exception as e:
         logger.error(f"Expense upload failed: {e}")
@@ -98,15 +107,8 @@ async def upload_expenses(file: UploadFile = File(...)):
 
 @router.post("/update-market")
 async def update_market(payload: MarketUpdate):
-    """
-    Updates the live market variables for the tenant.
-    """
-    # TODO: Save to Database
-    # await db.execute("UPDATE tenant_settings SET lme_rate = $1, billet_premium = $2, stock_length = $3", 
-    #                 payload.lme_rate, payload.billet_premium, payload.stock_length)
-    
     return {
         "status": "success",
-        "message": "Market variables updated successfully.",
+        "message": "Market variables updated.",
         "data": payload.model_dump()
     }
