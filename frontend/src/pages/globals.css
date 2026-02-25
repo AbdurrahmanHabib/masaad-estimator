@@ -3,8 +3,15 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply bg-ms-dark text-slate-100;
-    font-feature-settings: "tnum"; /* Forced Tabular Numbers for precise data alignment */
+  html, body {
+    @apply bg-ms-dark text-slate-100 min-h-screen overflow-x-hidden;
+    font-family: 'JetBrains Mono', monospace;
+    font-feature-settings: "tnum";
+  }
+}
+
+@layer components {
+  .ms-button-primary {
+    @apply py-5 bg-ms-emerald hover:bg-emerald-500 text-black font-black uppercase text-sm tracking-widest transition-all rounded-sm shadow-lg shadow-emerald-500/10 text-center;
   }
 }
