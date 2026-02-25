@@ -7,6 +7,7 @@ import asyncpg
 from contextlib import asynccontextmanager
 
 from app.api.settings_routes import router as settings_router
+from app.api.ingestion_routes import router as ingestion_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -77,6 +78,7 @@ app.add_middleware(
 )
 
 app.include_router(settings_router)
+app.include_router(ingestion_router)
 
 @app.get("/health")
 async def health_check():

@@ -3,42 +3,38 @@ import { FileText, Download, Scissors, Shield } from 'lucide-react';
 
 const ExportCenter = ({ project_id }: { project_id: string }) => {
   return (
-    <div className="bg-white border-t border-slate-100 w-80 p-6 space-y-6 flex flex-col z-10">
+    <div className="space-y-6">
       <div>
-        <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6 flex items-center gap-2">
-          <Download size={12} /> Export_Control_Center
-        </h3>
-        
         <div className="space-y-3">
-          <button className="w-full flex items-center justify-between p-4 bg-ms-primary text-white hover:bg-ms-dark transition-all rounded-sm group">
+          <button className="w-full flex items-center justify-between p-4 bg-ms-emerald hover:bg-emerald-600 text-black transition-all rounded-sm group shadow-lg shadow-ms-emerald/5">
             <div className="text-left">
-              <span className="block text-[10px] font-bold opacity-60 uppercase tracking-tighter">Technical_Submittal</span>
-              <span className="text-[11px] font-black uppercase tracking-tight">Shop_Drawings.PDF</span>
+              <span className="block text-[8px] font-black opacity-70 uppercase tracking-widest">Technical_Submittal</span>
+              <span className="text-[10px] font-black uppercase tracking-[0.1em]">Generate_Shop_Drawings</span>
             </div>
-            <FileText size={18} className="opacity-40 group-hover:opacity-100" />
+            <FileText size={16} className="opacity-70 group-hover:opacity-100" />
           </button>
 
-          <button className="w-full flex items-center justify-between p-4 border border-ms-primary text-ms-primary hover:bg-slate-50 transition-all rounded-sm group">
+          <button className="w-full flex items-center justify-between p-4 bg-ms-panel border border-ms-border text-slate-300 hover:border-ms-emerald/50 hover:bg-ms-dark transition-all rounded-sm group">
             <div className="text-left">
-              <span className="block text-[10px] font-bold opacity-60 uppercase tracking-tighter">Commercial_Quote</span>
-              <span className="text-[11px] font-black uppercase tracking-tight">Formal_BOQ_v1.PDF</span>
+              <span className="block text-[8px] font-black opacity-50 uppercase tracking-widest">Commercial_Quote</span>
+              <span className="text-[10px] font-black uppercase tracking-[0.1em]">Export_Formal_BOQ</span>
             </div>
-            <Download size={18} className="opacity-40 group-hover:opacity-100" />
+            <Download size={16} className="opacity-40 group-hover:opacity-100" />
           </button>
         </div>
       </div>
 
-      <div className="pt-6 border-t border-slate-100">
-        <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-4 flex items-center gap-2">
-          <Shield size={12} /> Internal_Production
+      <div className="pt-6 border-t border-ms-border">
+        <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-4 flex items-center gap-2 italic">
+          <Shield size={12} /> Production_Release
         </h3>
         
-        <button className="w-full flex items-center justify-between p-4 bg-slate-50 text-slate-400 hover:bg-slate-100 transition-all rounded-sm group">
+        <button className="w-full flex items-center justify-between p-4 bg-ms-dark/40 border border-ms-border text-slate-500 hover:text-slate-300 hover:border-ms-amber/50 transition-all rounded-sm group">
           <div className="text-left">
-            <span className="block text-[10px] font-bold opacity-60 uppercase tracking-tighter">Factory_Use_Only</span>
-            <span className="text-[11px] font-black uppercase tracking-tight">Cutting_List.CSV</span>
+            <span className="block text-[8px] font-black opacity-50 uppercase tracking-widest text-ms-amber">Factory_Provisioning</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.1em]">Download_Cutting_List</span>
           </div>
-          <Scissors size={18} className="opacity-30 group-hover:opacity-100" />
+          <Scissors size={16} className="opacity-30 group-hover:opacity-100 group-hover:text-ms-amber" />
         </button>
       </div>
     </div>

@@ -3,16 +3,18 @@ import { useRouter } from 'next/router';
 import InteractiveBOQ from '../../components/InteractiveBOQ';
 import VarianceAlerts from '../../components/VarianceAlerts';
 import QuantificationAuditor from '../../components/QuantificationAuditor';
-import StructuralInsight from '../../components/StructuralInsight';
 import ExportCenter from '../../components/ExportCenter';
+import OptimizationVisualizer from '../../components/Estimator/OptimizationVisualizer';
+import StructuralChecklist from '../../components/Estimator/StructuralChecklist';
 import { useEstimateStore } from '../../store/useEstimateStore';
+import { Layers, Activity, DollarSign, ShieldAlert, Cpu, BarChart3, Box, HardHat } from 'lucide-react';
 
 const EstimatePage = () => {
   const router = useRouter();
   const { id } = router.query;
   const { boq, status, setBOQ } = useEstimateStore();
   const [progress, setProgress] = useState(0);
-  const [view, setView] = useState<'COMMERCIAL' | 'ENGINEERING'>('COMMERCIAL');
+  const [workbench, setWorkbench] = useState<'BOQ' | 'OPTIMIZATION' | 'STRUCTURAL'>('BOQ');
 
   useEffect(() => {
     if (!id) return;
@@ -25,14 +27,14 @@ const EstimatePage = () => {
             name: "AL KABIR TOWER - PHASE 1",
             location: "Kabul, Afghanistan (Export)",
             lme_ref: 2485.50,
-            total_price_aed: 1845600.00, // Price increased due to ACP
+            total_price_aed: 1845600.00,
             client_summary: { lme_reference_usd_mt: 2485.50 },
             line_items: [
               { desc: "Thermal Break Curtain Wall (GULF-EXT-7001)", quantity: 2450.5, amount: 850000.00 },
               { desc: "12mm Laminated Heat Soaked Glass (Double Glazed)", quantity: 1850.2, amount: 320000.00 },
-              { desc: "ACP Cladding - 4mm PVDF Coating (Alucopanel/Alubond)", quantity: 2850.5, amount: 545000.00 },
-              { desc: "ACP Secondary Sub-structure (Alum Runners/Brkts)", quantity: 8450, amount: 95150.00 },
-              { desc: "Site Installation & Logistics (Ajman)", quantity: 1, amount: 35450.00 }
+              { desc: "ACP Cladding - 4mm PVDF Coating", quantity: 2850.5, amount: 545000.00 },
+              { desc: "ACP Secondary Sub-structure", quantity: 8450, amount: 95150.00 },
+              { desc: "Site Installation & Logistics", quantity: 1, amount: 35450.00 }
             ],
             audit: {
               openings: 845,
@@ -46,9 +48,10 @@ const EstimatePage = () => {
               ixx_req: 112.5,
               ixx_prov: 115.8
             },
+            layers: ['A-CW-EXT', 'A-CW-INT', 'A-GLASS-VIS', 'A-ACP-PNL', 'A-STR-BRK'],
             variances: [
-              "SAFETY_OVERRIDE: Structural failure detected on North Elevation Mullions. AI upgraded to GULF-EXT-7002-HD.",
-              "ACP_CALCULATION: Detected 549.5 m² of window/door voids subtracted from gross ACP area across all side-by-side layouts.",
+              "SAFETY_OVERRIDE: Structural failure detected on North Elevation Mullions.",
+              "ACP_CALCULATION: Detected 549.5 m² of window/door voids subtracted.",
               "KABUL_PRESSURE: Pressure equalization valves added to all DGU units."
             ]
           });
@@ -60,52 +63,161 @@ const EstimatePage = () => {
     return () => clearInterval(timer);
   }, [id, setBOQ]);
 
+  if (status !== 'COMPLETE') {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-ms-dark p-20">
+        <div className="w-full max-w-md space-y-4">
+          <div className="flex justify-between items-end mb-2">
+             <span className="text-[10px] font-black text-ms-emerald uppercase tracking-[0.2em]">Agent_Fusion_In_Progress</span>
+             <span className="text-xs font-mono text-white">{progress}%</span>
+          </div>
+          <div className="h-1 bg-ms-border w-full rounded-full overflow-hidden">
+            <div className="h-full bg-ms-emerald transition-all duration-500 shadow-[0_0_10px_#10b981]" style={{ width: `${progress}%` }}></div>
+          </div>
+          <p className="text-center text-slate-500 text-[8px] font-mono animate-pulse uppercase tracking-[0.4em]">Quantifying_Geometry_&_Specs...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-ms-bg flex flex-col font-sans selection:bg-ms-glass/20">
-      <header className="h-20 bg-white/90 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-10 z-50">
-        <div className="flex items-center gap-5">
-          <img src="/logo.png" alt="Logo" className="h-8 w-auto object-contain" />
-          <div className="h-6 w-[1px] bg-slate-200"></div>
-          <div className="flex flex-col">
-            <span className="text-[9px] font-black uppercase tracking-[0.2em] text-ms-primary">Al Kabir Tower</span>
-            <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Kabul, AF // ACP & Glazing Audit</span>
+    <div className="flex flex-col h-full bg-ms-dark overflow-hidden">
+      <div className="flex flex-1 overflow-hidden divide-x divide-ms-border">
+        
+        {/* COLUMN 1: SYSTEM NAVIGATOR (20%) */}
+        <div className="w-[20%] flex flex-col bg-ms-dark overflow-hidden">
+          <div className="p-3 border-b border-ms-border flex items-center gap-2 bg-ms-panel/20">
+            <Layers size={14} className="text-slate-500" />
+            <h3 className="text-[9px] font-black uppercase tracking-widest text-slate-300">System_Navigator</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+            {boq.layers?.map((layer: string) => (
+              <div key={layer} className="flex items-center justify-between p-2.5 bg-ms-panel/30 border border-ms-border rounded-sm hover:border-ms-emerald/30 transition-all cursor-pointer group">
+                <span className="text-[9px] font-mono text-slate-400 group-hover:text-white transition-colors">{layer}</span>
+                <Activity size={10} className="text-slate-700 group-hover:text-ms-emerald transition-colors" />
+              </div>
+            ))}
+          </div>
+          <div className="p-3 border-t border-ms-border bg-ms-panel/10">
+            <div className="flex items-center gap-2 mb-2 text-[8px] font-bold text-slate-600 uppercase tracking-widest">
+              <Cpu size={12} /> Logic_Core_Active
+            </div>
+            <div className="h-0.5 bg-ms-border rounded-full overflow-hidden">
+              <div className="h-full bg-ms-emerald w-full shadow-[0_0_5px_#10b981]"></div>
+            </div>
           </div>
         </div>
+
+        {/* COLUMN 2: ACTIVE WORKBENCH (50%) */}
+        <div className="w-[50%] flex flex-col bg-ms-dark relative overflow-hidden">
+          {/* WORKBENCH TOGGLE */}
+          <div className="p-3 border-b border-ms-border flex justify-between items-center bg-ms-panel/40 backdrop-blur-sm sticky top-0 z-10">
+            <div className="flex gap-1.5 bg-ms-dark/80 p-1 border border-ms-border rounded-sm">
+              <button 
+                onClick={() => setWorkbench('BOQ')} 
+                className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-[0.2em] rounded-sm transition-all flex items-center gap-2 ${workbench === 'BOQ' ? 'bg-ms-emerald text-black shadow-lg shadow-ms-emerald/10' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <BarChart3 size={12} /> BOQ_Matrix
+              </button>
+              <button 
+                onClick={() => setWorkbench('OPTIMIZATION')} 
+                className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-[0.2em] rounded-sm transition-all flex items-center gap-2 ${workbench === 'OPTIMIZATION' ? 'bg-ms-emerald text-black shadow-lg shadow-ms-emerald/10' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <Box size={12} /> Nesting_2D
+              </button>
+              <button 
+                onClick={() => setWorkbench('STRUCTURAL')} 
+                className={`px-3 py-1.5 text-[8px] font-black uppercase tracking-[0.2em] rounded-sm transition-all flex items-center gap-2 ${workbench === 'STRUCTURAL' ? 'bg-ms-emerald text-black shadow-lg shadow-ms-emerald/10' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <HardHat size={12} /> Structural_Audit
+              </button>
+            </div>
+            <div className="text-[10px] font-mono text-ms-emerald font-black tracking-tighter">
+              PROJECT::{id}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {workbench === 'BOQ' && (
+              <div className="animate-in fade-in slide-in-from-bottom-1 duration-300">
+                <InteractiveBOQ />
+              </div>
+            )}
+            {workbench === 'OPTIMIZATION' && (
+              <div className="animate-in fade-in slide-in-from-bottom-1 duration-300 h-full">
+                <OptimizationVisualizer />
+              </div>
+            )}
+            {workbench === 'STRUCTURAL' && (
+              <div className="animate-in fade-in slide-in-from-bottom-1 duration-300">
+                <StructuralChecklist />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* COLUMN 3: FINANCIAL PULSE (30%) */}
+        <div className="w-[30%] flex flex-col bg-ms-panel/10 overflow-hidden">
+          <div className="p-3 border-b border-ms-border flex items-center gap-2 bg-ms-panel/30">
+            <DollarSign size={14} className="text-ms-emerald" />
+            <h3 className="text-[9px] font-black uppercase tracking-widest text-ms-emerald">Commercial_Pulse</h3>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <QuantificationAuditor data={boq.audit} />
+
+            <div className="border-t border-ms-border pt-4">
+              <div className="flex items-center gap-2 mb-3 text-[8px] font-black text-ms-amber uppercase tracking-widest italic">
+                <ShieldAlert size={14} /> Intelligence_Variance_Reports
+              </div>
+              <VarianceAlerts variances={boq?.variances || []} />
+            </div>
+
+            <div className="border-t border-ms-border pt-4">
+              <ExportCenter project_id={id as string} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* STICKY PROJECT FOOTER */}
+      <footer className="h-14 bg-ms-panel border-t border-ms-emerald/30 flex items-center px-6 gap-12 z-20 shadow-[0_-10px_30px_rgba(16,185,129,0.05)] relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-[1px] bg-ms-emerald animate-pulse opacity-50"></div>
         
-        <div className="flex bg-slate-100 p-1 rounded-sm">
-          <button onClick={() => setView('COMMERCIAL')} className={`px-6 py-2 text-[9px] font-black uppercase tracking-widest rounded-sm transition-all ${view === 'COMMERCIAL' ? 'bg-ms-primary text-white shadow-lg shadow-ms-primary/20' : 'text-slate-400'}`}>Commercial</button>
-          <button onClick={() => setView('ENGINEERING')} className={`px-6 py-2 text-[9px] font-black uppercase tracking-widest rounded-sm transition-all ${view === 'ENGINEERING' ? 'bg-ms-primary text-white shadow-lg shadow-ms-primary/20' : 'text-slate-400'}`}>Engineering</button>
-        </div>
-      </header>
+        <div className="flex items-center gap-10 flex-1">
+          <div className="flex flex-col">
+            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Total_Project_Sell_Price</span>
+            <span className="text-lg font-mono text-ms-emerald font-black tabular-nums tracking-tighter">
+              AED {boq.total_price_aed?.toLocaleString()}
+            </span>
+          </div>
+          
+          <div className="h-8 w-[1px] bg-ms-border"></div>
 
-      <main className="flex-1 flex overflow-hidden relative">
-        <div className="flex-1 p-12 overflow-y-auto">
-          {status !== 'COMPLETE' ? (
-            <div className="max-w-xl mx-auto pt-40 space-y-6">
-              <div className="h-[2px] bg-slate-100 w-full"><div className="h-full bg-ms-glass transition-all duration-500" style={{ width: `${progress}%` }}></div></div>
-              <p className="text-center text-slate-400 text-[9px] font-mono animate-pulse uppercase tracking-[0.3em]">Processing_Layouts_&_ACP_Matrix...</p>
+          <div className="flex flex-col">
+            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Total_Engineering_Mass</span>
+            <span className="text-lg font-mono text-white font-black tabular-nums tracking-tighter">
+              {(boq.audit.linear_meters * 2.4).toLocaleString()} <span className="text-[10px] text-slate-600">KG</span>
+            </span>
+          </div>
+
+          <div className="h-8 w-[1px] bg-ms-border"></div>
+
+          <div className="flex flex-col">
+            <span className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Calculated_Net_Profit</span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-lg font-mono text-ms-emerald font-black tabular-nums tracking-tighter">22.4%</span>
+              <div className="w-12 h-1.5 bg-ms-dark border border-ms-border rounded-full overflow-hidden">
+                <div className="h-full bg-ms-emerald w-[70%]"></div>
+              </div>
             </div>
-          ) : (
-            <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
-              {view === 'COMMERCIAL' ? <InteractiveBOQ /> : (
-                <>
-                  <QuantificationAuditor data={boq.audit} />
-                  <StructuralInsight audit={boq.audit} />
-                </>
-              )}
-            </div>
-          )}
+          </div>
         </div>
 
-        <div className="flex flex-col border-l border-slate-100 h-full">
-            <VarianceAlerts variances={boq?.variances || []} />
-            <ExportCenter project_id={id as string} />
-        </div>
-
-        <div className="absolute bottom-8 left-12 text-[8px] font-mono text-slate-300 uppercase tracking-[0.2em] pointer-events-none">
-          Architecture by Masaad // Madinat Al Saada Corp.
-        </div>
-      </main>
+        <button className="bg-ms-slate-800 hover:bg-ms-emerald hover:text-black text-ms-emerald px-6 py-2 rounded-sm text-[9px] font-black uppercase tracking-[0.2em] transition-all border border-ms-emerald/20 hover:border-ms-emerald">
+          FINAL_PROJECT_RELEASE
+        </button>
+      </footer>
     </div>
   );
 };

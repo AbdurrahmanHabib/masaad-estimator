@@ -1,108 +1,156 @@
 import React, { useState } from 'react';
-import Link from 'next/link';
-import { Upload, Users, Briefcase, TrendingUp, Settings2 } from 'lucide-react';
+import { 
+  Upload, 
+  Users, 
+  Briefcase, 
+  TrendingUp, 
+  Building2, 
+  Calculator,
+  ShieldCheck,
+  Zap
+} from 'lucide-react';
 import CatalogUploader from '../../components/Settings/CatalogUploader';
 
 export default function SettingsDashboard() {
-  const [marketVars, setMarketVars] = useState({ lmeRate: 2450.00, billetPremium: 450.00, stockLength: 6.0 });
-  const [activeRates, setActiveRates] = useState({ trueShopRate: "0.00", totalAdmin: "0.00" });
+  const [marketVars, setMarketVars] = useState({ lmeRate: 2450.00, billetPremium: 450.00 });
+  const [activeRates, setActiveRates] = useState({ 
+    trueShopRate: 48.75, 
+    totalAdminPool: 1245000,
+    factoryHeadcount: 142
+  });
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-200 font-sans overflow-hidden">
-      {/* SIDEBAR */}
-      <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between pt-1">
+    <div className="flex-1 overflow-y-auto p-6 bg-ms-dark space-y-6">
+      <div className="flex items-center justify-between border-b border-ms-border pb-4">
         <div>
-          <div className="p-6 border-b border-slate-800 text-center">
-            <img src="/logo.png" alt="Madinat Al Saada" className="h-16 mx-auto mb-4 object-contain" />
-            <h1 className="text-sm font-bold uppercase tracking-widest text-white leading-tight">Madinat Al Saada</h1>
-            <p className="text-[10px] text-ms-emerald font-mono mt-2 uppercase tracking-tighter">SaaS_TENANT_ADMIN</p>
+          <h2 className="text-xl font-black uppercase tracking-tighter text-ms-emerald italic">Mission_Control_Center</h2>
+          <p className="text-[10px] text-slate-500 font-mono uppercase tracking-[0.2em]">Group_Financial_Architecture // SaaS_Admin</p>
+        </div>
+        <div className="flex gap-4">
+          <div className="px-4 py-2 bg-ms-panel border border-ms-border rounded-sm text-right">
+            <span className="block text-[7px] font-black text-slate-500 uppercase tracking-widest">Group_Global_Sync</span>
+            <span className="text-xs font-mono text-ms-emerald font-black tracking-tighter">ESTABLISHED_✓</span>
           </div>
-          <nav className="p-4 space-y-2">
-            <Link href="/" className="block px-4 py-3 hover:bg-slate-800 text-slate-400 hover:text-white rounded text-xs font-bold uppercase tracking-wider transition-all">
-              Dashboard
-            </Link>
-            <Link href="/estimate/new" className="block px-4 py-3 hover:bg-slate-800 text-slate-400 hover:text-white rounded text-xs font-bold uppercase tracking-wider transition-all">
-              + New Estimate
-            </Link>
-            <Link href="/settings" className="block px-4 py-3 bg-ms-emerald/10 text-ms-emerald rounded border border-ms-emerald/20 text-xs font-bold uppercase tracking-wider shadow-inner">
-              Market Settings
-            </Link>
-          </nav>
         </div>
       </div>
 
-      {/* MAIN CONTENT */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-16 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between px-10 backdrop-blur-md">
-          <div className="flex items-center gap-3">
-            <Settings2 size={18} className="text-ms-emerald" />
-            <h2 className="text-lg font-light tracking-wide text-slate-300 italic">Dynamic_Tenant_Control</h2>
-          </div>
-          <div className="flex items-center gap-6 text-[10px] font-mono text-slate-500 uppercase">
-            <span className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-ms-emerald animate-pulse"></span> GLOBAL_SYNC: ACTIVE</span>
-          </div>
-        </header>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* CONSOLIDATED GROUP PANEL */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-ms-panel border border-ms-border p-6 shadow-2xl relative overflow-hidden rounded-sm group hover:border-ms-emerald/30 transition-all">
+            <div className="flex items-center justify-between mb-6 border-b border-ms-border pb-4">
+              <div className="flex items-center gap-3">
+                <Building2 size={18} className="text-ms-emerald" />
+                <div>
+                  <h3 className="text-xs font-black text-white uppercase tracking-widest">Consolidated_Group_Panel</h3>
+                  <p className="text-[8px] text-slate-500 font-mono">Aggregating: MADINAT | AL JAZEERA | MADINAT AL JAZEERA</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="block text-[8px] font-black text-slate-500 uppercase">Total_Overhead_Pool</span>
+                <span className="text-2xl font-mono text-white font-black tabular-nums tracking-tighter">
+                  AED {activeRates.totalAdminPool.toLocaleString()}
+                </span>
+              </div>
+            </div>
 
-        <main className="flex-1 overflow-y-auto p-10 bg-slate-950">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* ZONE 1: PAYROLL */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                    <Users size={12} className="text-ms-emerald" /> Payroll_Engine
+                  </h4>
+                  <span className="text-[8px] font-mono text-ms-emerald bg-ms-emerald/5 px-2 py-0.5 rounded border border-ms-emerald/10">Filter: JOB_LOC=='FACTORY'</span>
+                </div>
+                <div className="border border-ms-border border-dashed bg-ms-dark/50 p-6 text-center cursor-pointer hover:bg-ms-emerald/[0.02] hover:border-ms-emerald/50 transition-all rounded-sm group/upload">
+                  <Upload size={20} className="mx-auto text-slate-600 mb-2 group-hover/upload:text-ms-emerald transition-colors" />
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Upload_Group_Payroll.csv</p>
+                  <p className="text-[7px] text-slate-600 font-mono">ISO_9001 Validation Enabled</p>
+                </div>
+              </div>
+
+              {/* ZONE 2: EXPENSES */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                    <Calculator size={12} className="text-ms-amber" /> Overhead_Matrix
+                  </h4>
+                  <span className="text-[8px] font-mono text-ms-amber bg-ms-amber/5 px-2 py-0.5 rounded border border-ms-amber/10">Action: SUM_ALL_COLUMNS</span>
+                </div>
+                <div className="border border-ms-border border-dashed bg-ms-dark/50 p-6 text-center cursor-pointer hover:bg-ms-amber/[0.02] hover:border-ms-amber/50 transition-all rounded-sm group/upload">
+                  <Upload size={20} className="mx-auto text-slate-600 mb-2 group-hover/upload:text-ms-amber transition-colors" />
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Upload_Admin_Expenses.csv</p>
+                  <p className="text-[7px] text-slate-600 font-mono">Precision: 4 Decimal Places</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <CatalogUploader />
+        </div>
+
+        {/* FINANCIAL PRECISION COLUMN */}
+        <div className="space-y-6">
+          <div className="bg-ms-panel border border-ms-border p-6 rounded-sm shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-2 opacity-5">
+              <Zap size={80} className="text-ms-emerald" />
+            </div>
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-6 border-b border-ms-border pb-3 italic">
+              <ShieldCheck size={14} className="text-ms-emerald" /> Real_Time_Metrics
+            </h3>
             
-            {/* COLUMN 1: UPLOAD ZONES */}
-            <div className="space-y-8">
-              <div className="bg-slate-900 border border-slate-800 p-6 shadow-2xl relative group overflow-hidden rounded-sm">
-                <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <Users size={14} className="text-ms-emerald" /> Zone 1: Labor & Payroll Engine
-                  </h3>
-                  <span className="text-[10px] font-mono text-ms-emerald bg-ms-emerald/10 px-2 py-1 rounded">True Shop Rate: AED {activeRates.trueShopRate}/hr</span>
+            <div className="space-y-6">
+              <div className="p-4 bg-ms-dark border border-ms-border rounded-sm group hover:border-ms-emerald/50 transition-all">
+                <label className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-3">True_Group_Shop_Rate</label>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-4xl font-mono text-ms-emerald font-black tabular-nums tracking-tighter shadow-ms-emerald/10 drop-shadow-2xl">
+                    {activeRates.trueShopRate.toFixed(2)}
+                  </span>
+                  <span className="text-xs font-bold text-slate-600">AED/HR</span>
                 </div>
-                <div className="border-2 border-dashed border-slate-800 hover:border-ms-emerald/50 bg-slate-950/50 p-8 text-center cursor-pointer transition-colors rounded-sm">
-                  <Upload size={24} className="mx-auto text-slate-600 mb-3" />
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Upload Payroll .CSV</p>
-                </div>
-              </div>
-
-              <div className="bg-slate-900 border border-slate-800 p-6 shadow-2xl relative group overflow-hidden rounded-sm">
-                <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                    <Briefcase size={14} className="text-ms-accent" /> Zone 2: Overhead & P&L
-                  </h3>
-                  <span className="text-[10px] font-mono text-ms-accent bg-ms-accent/10 px-2 py-1 rounded">Admin Pool: AED {activeRates.totalAdmin}</span>
-                </div>
-                <div className="border-2 border-dashed border-slate-800 hover:border-ms-accent/50 bg-slate-950/50 p-8 text-center cursor-pointer transition-colors rounded-sm">
-                  <Upload size={24} className="mx-auto text-slate-600 mb-3" />
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Upload Admin Expenses .CSV</p>
+                <div className="mt-4 flex justify-between items-center text-[7px] font-mono text-slate-500 uppercase">
+                  <span>Factory_HC: {activeRates.factoryHeadcount}</span>
+                  <span className="text-ms-emerald">Burden_Factor: 1.35x</span>
                 </div>
               </div>
 
-              {/* ZONE 3: INTEGRATED CATALOG UPLOADER */}
-              <CatalogUploader />
-            </div>
-
-            {/* COLUMN 2: MARKET VARIABLES */}
-            <div className="space-y-8">
-              <div className="bg-slate-900 border border-slate-800 p-8 shadow-2xl rounded-sm">
-                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-6 border-b border-slate-800 pb-3">
-                  <TrendingUp size={14} className="text-white" /> Zone 4: Market Variables
-                </h3>
-                
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Live LME Rate (USD/MT)</label>
-                    <input type="number" value={marketVars.lmeRate} className="w-full bg-slate-950 border border-slate-800 text-ms-emerald font-mono p-3 rounded-sm" />
+              <div className="space-y-4 pt-4">
+                <div className="bg-ms-dark/40 border border-ms-border p-4 rounded-sm">
+                  <label className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-3 italic">Market_Volatilty_Control</label>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="flex justify-between mb-1">
+                        <span className="text-[7px] text-slate-500 uppercase font-bold">Live_LME_Alum_Rate (USD/MT)</span>
+                      </div>
+                      <input 
+                        type="number" 
+                        value={marketVars.lmeRate} 
+                        onChange={(e) => setMarketVars({...marketVars, lmeRate: Number(e.target.value)})}
+                        className="w-full bg-ms-dark border border-ms-border text-ms-emerald font-mono text-xs p-2.5 rounded-sm focus:outline-none focus:border-ms-emerald/50 transition-all" 
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[7px] text-slate-500 uppercase font-bold block mb-1">Billet_Premium (USD/MT)</span>
+                      <input 
+                        type="number" 
+                        value={marketVars.billetPremium} 
+                        onChange={(e) => setMarketVars({...marketVars, billetPremium: Number(e.target.value)})}
+                        className="w-full bg-ms-dark border border-ms-border text-white font-mono text-xs p-2.5 rounded-sm focus:outline-none focus:border-ms-emerald/50 transition-all" 
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Billet Premium (USD/MT)</label>
-                    <input type="number" value={marketVars.billetPremium} className="w-full bg-slate-950 border border-slate-800 text-white font-mono p-3 rounded-sm" />
-                  </div>
-                  <button className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-white font-black uppercase text-[10px] tracking-[0.2em] transition-all rounded-sm border border-slate-700 mt-4">
-                    Commit Market Variables
-                  </button>
                 </div>
+
+                <button className="w-full py-3.5 bg-ms-slate-800 hover:bg-ms-emerald hover:text-black text-ms-emerald font-black uppercase text-[9px] tracking-[0.2em] transition-all rounded-sm border border-ms-border hover:border-ms-emerald shadow-lg shadow-ms-emerald/5">
+                  Commit_Financial_Variables
+                </button>
               </div>
             </div>
-
           </div>
-        </main>
+        </div>
+
       </div>
     </div>
   );
