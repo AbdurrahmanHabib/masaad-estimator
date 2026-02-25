@@ -6,75 +6,30 @@ logger = logging.getLogger("masaad-api")
 class FinanceEngine:
     """
     Dynamic Finance Engine linked to SaaS configuration.
-    Fetches active rates from the database instead of hardcoding variables.
+    Calculates project-specific rates based on uploaded operational data.
     """
-    def __init__(self, db_pool):
+    def __init__(self, db_pool=None):
         self.db = db_pool
 
-    async def get_active_tenant_rates(self) -> Dict[str, float]:
+    async def calculate_burdened_rate(self, payroll_data: Dict[str, float], admin_expenses: float) -> float:
         """
-        Retrieves the dynamically uploaded rates from the database.
-        Returns 0.00 if no data has been uploaded (Zero-Knowledge start).
+        True_Hourly_Rate = (Monthly_Payroll + Monthly_Admin_Expenses) / (Headcount * 260 Hours)
+        payroll_data: {"factory_payroll": float, "headcount": int}
         """
-        try:
-            # Query the tenant_settings table (assuming it exists and has id=1 for the tenant)
-            # async with self.db.acquire() as conn:
-            #     row = await conn.fetchrow("SELECT true_shop_rate, total_admin_expenses, lme_rate, billet_premium, stock_length FROM tenant_settings WHERE id = 1")
+        factory_payroll = payroll_data.get("factory_payroll", 0.0)
+        headcount = payroll_data.get("headcount", 0)
+        
+        if headcount == 0:
+            return 0.0
             
-            # Mocking the DB fetch for now until schema is updated
-            row = None 
-            
-            if not row:
-                logger.warning("No tenant settings found in database. Defaulting to 0.00.")
-                return {
-                    "true_shop_rate_aed": 0.00,
-                    "total_admin_expenses_aed": 0.00,
-                    "lme_rate_usd": 0.00,
-                    "billet_premium_usd": 0.00,
-                    "stock_length_m": 6.0
-                }
-                
-            return {
-                "true_shop_rate_aed": float(row['true_shop_rate']),
-                "total_admin_expenses_aed": float(row['total_admin_expenses']),
-                "lme_rate_usd": float(row['lme_rate']),
-                "billet_premium_usd": float(row['billet_premium']),
-                "stock_length_m": float(row['stock_length'])
-            }
-        except Exception as e:
-            logger.error(f"Failed to fetch tenant rates: {e}")
-            # Fail safe to zero to prevent unauthorized profit calculations
-            return {
-                "true_shop_rate_aed": 0.00,
-                "total_admin_expenses_aed": 0.00,
-                "lme_rate_usd": 0.00,
-                "billet_premium_usd": 0.00,
-                "stock_length_m": 6.0
-            }
+        # 260 Hours assumes 10 hours/day * 26 days (standard UAE industrial month)
+        total_monthly_burden = factory_payroll + admin_expenses
+        true_hourly_rate = total_monthly_burden / (headcount * 260)
+        
+        return round(true_hourly_rate, 2)
 
-    async def calculate_loaded_cost(self, direct_material_cost: float, direct_labor_hours: float) -> float:
-        """
-        Calculates the final cost using ONLY the dynamically uploaded data.
-        """
-        rates = await self.get_active_tenant_rates()
-        
-        labor_cost = direct_labor_hours * rates["true_shop_rate_aed"]
-        
-        # Simplified dynamic overhead application
-        # If admin expenses are extremely high, this simplistic ratio would need
-        # to be adjusted based on the company's expected annual turnover.
-        # Here we apply a simplistic percentage logic or just sum it if it's a project-specific allocation.
-        
-        # For demonstration: We assume total_admin_expenses is a monthly pool and 
-        # needs to be distributed across active projects. 
-        # We will apply a strict "Zero Data = Zero Value" rule.
-        
-        total_loaded_cost = direct_material_cost + labor_cost
-        
-        # Apply LME based material adjustments (simplified)
-        if rates["lme_rate_usd"] > 0:
-             # Just an example of how the dynamic variable affects the final cost
-             material_lme_factor = (rates["lme_rate_usd"] + rates["billet_premium_usd"]) * 3.6725 / 1000
-             total_loaded_cost += (direct_material_cost * material_lme_factor * 0.01) # Example scaling
-             
-        return round(total_loaded_cost, 2)
+    def calculate_material_tonnage_cost(self, weight_kg: float, lme_usd: float, billet_premium_usd: float) -> float:
+        """Calculates landed material cost in AED."""
+        usd_aed = 3.6725
+        rate_per_kg = ((lme_usd + billet_premium_usd) * usd_aed) / 1000
+        return round(weight_kg * rate_per_kg, 2)
