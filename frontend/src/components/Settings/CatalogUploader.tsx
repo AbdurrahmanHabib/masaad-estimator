@@ -3,10 +3,8 @@ import { Download, Upload, ShieldCheck } from 'lucide-react';
 
 const CatalogUploader = () => {
   const downloadTemplate = () => {
-    const headers = "Supplier_Name,System_Series,Die_Number,Description,Weight_kg_m,Perimeter_mm,Scrap_Value_Factor
-";
-    const example = "Gulf Extrusions,GE-F,F-1025,Standard Mullion,2.450,450.5,1.0
-";
+    const headers = "Supplier_Name,System_Series,Die_Number,Description,Weight_kg_m,Perimeter_mm,Scrap_Value_Factor\n";
+    const example = "Gulf Extrusions,GE-F,F-1025,Standard Mullion,2.450,450.5,1.0\n";
     const blob = new Blob([headers + example], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
