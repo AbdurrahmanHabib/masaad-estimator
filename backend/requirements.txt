@@ -1,0 +1,33 @@
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+websockets==12.0
+
+# Database & Async
+asyncpg==0.29.0
+sqlalchemy[asyncio]==2.0.25
+alembic==1.13.1
+redis==5.0.1
+
+# AI & Orchestration
+langgraph==0.0.24
+litellm==1.25.0
+ultralytics==8.1.0        # YOLOv8
+ezdxf==1.1.0              # CAD Parsing
+PyMuPDF==1.23.8           # PDF Extraction
+simpleeval==0.9.13        # Safe AST Evaluation
+
+# Math & Optimization
+ortools==9.8.3296         # CSP Optimization
+numpy==1.26.3
+pandas==2.2.0
+
+# Task Queue (GPU Offloading)
+celery==5.3.6
+boto3==1.34.0             # AWS SQS/EC2 Integration
+
+# Environment & Security
+python-dotenv==1.0.1
+jose==3.3.0               # JWT
+passlib[bcrypt]==1.7.4

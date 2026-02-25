@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+ENV/
+
+# Node
+node_modules/
+.next/
+out/
+build/
+.DS_Store
+
+# CAD/PDF Tmp
+tmp_page.png
+*.dxf
+*.dwg
+downloads/
