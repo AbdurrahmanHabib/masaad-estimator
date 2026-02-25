@@ -5,28 +5,30 @@ logger = logging.getLogger("masaad-api")
 
 class FinanceEngine:
     """
-    Dynamic Financial Engine.
-    Calculates the 'True Burdened Rate' - the floor price for every hour of factory time.
+    Consolidated Financial Engine for Madinat Al Saada Group.
+    Calculates the True Burdened Rate by merging group-wide admin expenses 
+    with factory-specific labor costs.
     """
     def __init__(self, db_pool=None):
         self.db = db_pool
 
-    def calculate_burdened_shop_rate(self, total_factory_payroll: float, total_madinat_admin: float, factory_headcount: int) -> float:
+    def calculate_burdened_rate(self, factory_payroll: float, madinat_admin_total: float, factory_headcount: int) -> float:
         """
-        Logic: (Total_Factory_Payroll + Total_Madinat_Admin) / (Factory_Headcount * 208 hours).
-        Ensures that project labor covers both worker salaries and office overhead.
+        True_Hourly_Rate = (Total_Factory_Payroll + Total_Madinat_Admin) / (Factory_Headcount * 208 hours)
+        Treats 'MADINAT' admin column as the primary group overhead.
         """
-        if factory_headcount <= 0:
+        if factory_headcount == 0:
+            logger.error("Factory headcount is zero. Cannot calculate rate.")
             return 0.0
             
-        # 208 hours = 8 hours/day * 26 working days
-        total_monthly_overhead = total_factory_payroll + total_madinat_admin
-        burdened_rate = total_monthly_overhead / (factory_headcount * 208)
+        # 208 hours = 8 hours/day * 26 working days (UAE standard industrial month)
+        total_burdened_cost = factory_payroll + madinat_admin_total
+        true_hourly_rate = total_burdened_cost / (factory_headcount * 208)
         
-        return round(burdened_rate, 2)
+        return round(true_hourly_rate, 2)
 
-    def calculate_material_landed_cost(self, tonnage: float, lme_usd: float, billet_premium_usd: float) -> float:
-        """Calculates AED cost for raw aluminum supply."""
-        usd_aed = 3.6725
-        rate_per_mt_aed = (lme_usd + billet_premium_usd) * usd_aed
-        return round(tonnage * rate_per_mt_aed, 2)
+    def calculate_project_margin(self, direct_cost: float, profit_pct: float) -> float:
+        """
+        Applies target profit on top of the established burdened cost.
+        """
+        return round(direct_cost * (1 + (profit_pct / 100)), 2)
