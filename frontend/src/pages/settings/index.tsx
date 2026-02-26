@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Upload, 
   Users, 
@@ -25,6 +25,20 @@ export default function SettingsDashboard() {
   const expensesInputRef = useRef<HTMLInputElement>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+  // Load current rates on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/settings/current-rates`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data) return;
+        if (data.lme_aluminum_usd_mt) setMarketVars(prev => ({ ...prev, lmeRate: data.lme_aluminum_usd_mt }));
+        if (data.baseline_labor_burn_rate_aed) {
+          setActiveRates(prev => ({ ...prev, trueShopRate: data.baseline_labor_burn_rate_aed }));
+        }
+      })
+      .catch(() => {});
+  }, [API_URL]);
 
   const handleFileUpload = async (type: 'payroll' | 'expenses', e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

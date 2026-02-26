@@ -1,207 +1,248 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, Settings, AlertCircle, Play, Loader2, CheckCircle2 } from 'lucide-react';
+import { useRouter } from 'next/router';
+import {
+  Upload, FileText, Play, Loader2, CheckCircle2, AlertCircle,
+  MapPin, Building2, Globe, Sliders,
+} from 'lucide-react';
+import { getAuthHeaders } from '../store/useAuthStore';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const ProjectIngestion = () => {
-  const [pricing, setPricing] = useState({
-    billetPremium: 450,
-    extrusionMargin: 2.5,
-    adminPct: 8,
-    factoryPct: 12,
-    riskPct: 5,
-    profitPct: 15
-  });
+  const router = useRouter();
 
-  const [drawingsFile, setDrawingsFile] = useState<File | null>(null);
-  const [specsFile, setSpecsFile] = useState<File | null>(null);
+  const [projectName, setProjectName] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [location, setLocation] = useState('Dubai, UAE');
+  const [country, setCountry] = useState('UAE');
+  const [complexity, setComplexity] = useState(1.0);
+  const [scopeBoundary, setScopeBoundary] = useState('Panels + Substructure');
+
+  const [dwgFile, setDwgFile] = useState<File | null>(null);
+  const [specFile, setSpecFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<{drawings?: 'idle' | 'success' | 'error', specs?: 'idle' | 'success' | 'error'}>({});
+  const [error, setError] = useState<string | null>(null);
 
-  const drawingsInputRef = useRef<HTMLInputElement>(null);
-  const specsInputRef = useRef<HTMLInputElement>(null);
+  const dwgRef = useRef<HTMLInputElement>(null);
+  const specRef = useRef<HTMLInputElement>(null);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
-  const handleFileChange = (type: 'drawings' | 'specs', e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (type === 'drawings') setDrawingsFile(file);
-      else setSpecsFile(file);
-      setUploadStatus(prev => ({ ...prev, [type]: 'idle' }));
-    }
-  };
-
-  const executeFusion = async () => {
-    if (!drawingsFile || !specsFile) {
-      alert("Please upload both Drawings and Specifications before executing Fusion.");
-      return;
-    }
+  const handleSubmit = async () => {
+    if (!projectName.trim()) { setError('Project name is required.'); return; }
+    if (!dwgFile && !specFile) { setError('Upload at least one file (DWG or PDF spec).'); return; }
 
     setIsProcessing(true);
+    setError(null);
+
     try {
-      // 1. Upload Drawings
-      const drawingsFormData = new FormData();
-      drawingsFormData.append('file', drawingsFile);
-      const drawingsRes = await fetch(`${API_URL}/api/ingestion/upload-drawings`, {
-        method: 'POST',
-        body: drawingsFormData
-      });
-      if (!drawingsRes.ok) throw new Error("Drawings upload failed");
-      const drawingsData = await drawingsRes.json();
-      setUploadStatus(prev => ({ ...prev, drawings: 'success' }));
+      const formData = new FormData();
+      formData.append('project_name', projectName.trim());
+      formData.append('client_name', clientName.trim());
+      formData.append('project_location', location.trim());
+      formData.append('project_country', country.trim());
+      formData.append('complexity_multiplier', String(complexity));
+      formData.append('scope_boundary', scopeBoundary);
+      if (dwgFile) formData.append('dwg_file', dwgFile);
+      if (specFile) formData.append('spec_file', specFile);
 
-      // 2. Upload Specs
-      const specsFormData = new FormData();
-      specsFormData.append('file', specsFile);
-      const specsRes = await fetch(`${API_URL}/api/ingestion/upload-specs`, {
+      const authHeaders = getAuthHeaders();
+      const res = await fetch(`${API_URL}/api/ingestion/new-project`, {
         method: 'POST',
-        body: specsFormData
+        body: formData,
+        headers: authHeaders as HeadersInit,
       });
-      if (!specsRes.ok) throw new Error("Specs upload failed");
-      const specsData = await specsRes.json();
-      setUploadStatus(prev => ({ ...prev, specs: 'success' }));
 
-      // 3. Execute Fusion Engine
-      const fusionRes = await fetch(`${API_URL}/api/ingestion/execute-fusion`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          drawings_id: drawingsData.file_id,
-          specs_id: specsData.file_id,
-          pricing_matrix: pricing
-        })
-      });
-      if (!fusionRes.ok) throw new Error("Fusion execution failed");
-      
-      alert("Fusion Engine Executed Successfully! Processing in background.");
+      if (!res.ok) {
+        const txt = await res.text().catch(() => 'Unknown error');
+        throw new Error(`Server error ${res.status}: ${txt}`);
+      }
+
+      const data = await res.json();
+      router.push(`/estimate/${data.estimate_id}`);
     } catch (err) {
-      console.error(err);
-      alert("An error occurred during fusion execution.");
-    } finally {
+      setError(String(err));
       setIsProcessing(false);
     }
   };
 
   return (
-    <div className="bg-ms-dark p-10 text-slate-200 font-sans h-full overflow-y-auto">
-      <div className="mb-8 border-b border-ms-border pb-4 flex justify-between items-end">
+    <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+      <div className="max-w-3xl mx-auto space-y-6">
+
+        {/* Header */}
         <div>
-          <h2 className="text-3xl font-black uppercase tracking-tighter text-ms-emerald italic">Omniscient Ingestion</h2>
-          <p className="text-[10px] text-slate-500 font-mono mt-1 uppercase tracking-[0.2em]">UAE True-Cost Market Model</p>
+          <h2 className="text-xl font-black text-slate-800 uppercase tracking-tight">New Estimate</h2>
+          <p className="text-xs text-slate-500 mt-1">Upload drawings + specs to start AI-powered estimation</p>
         </div>
-        <button 
-          onClick={executeFusion}
+
+        {/* Project Details */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Building2 size={16} className="text-blue-600" />
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Project Details</h3>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                Project Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Al Kabir Tower — Curtain Wall"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Client Name</label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="e.g. Al Kabir Developments LLC"
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                <MapPin size={10} className="inline mr-1" /> Location
+              </label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                <Globe size={10} className="inline mr-1" /> Country
+              </label>
+              <select
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {['UAE', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Bahrain', 'Oman', 'Egypt', 'Other'].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">
+                <Sliders size={10} className="inline mr-1" /> Complexity Multiplier
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min={0.5}
+                  max={2.0}
+                  step={0.1}
+                  value={complexity}
+                  onChange={(e) => setComplexity(Number(e.target.value))}
+                  className="flex-1"
+                />
+                <span className="text-sm font-mono font-bold text-blue-600 w-8">{complexity.toFixed(1)}×</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5">Scope Boundary</label>
+              <select
+                value={scopeBoundary}
+                onChange={(e) => setScopeBoundary(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                {[
+                  'Panels Only',
+                  'Panels + Substructure',
+                  'Full Supply & Install',
+                  'Design + Supply + Install',
+                ].map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* File Upload */}
+        <div className="bg-white rounded-2xl border border-slate-200 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Upload size={16} className="text-blue-600" />
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-700">Upload Files</h3>
+            <span className="text-[10px] text-slate-400 ml-auto">At least one file required</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            {/* DWG */}
+            <input ref={dwgRef} type="file" accept=".dwg,.dxf" className="hidden" onChange={(e) => setDwgFile(e.target.files?.[0] ?? null)} />
+            <button
+              type="button"
+              onClick={() => dwgRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-6 text-center transition-all hover:border-blue-400 ${dwgFile ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 hover:bg-blue-50'}`}
+            >
+              {dwgFile ? (
+                <>
+                  <CheckCircle2 size={24} className="mx-auto text-emerald-500 mb-2" />
+                  <p className="text-xs font-bold text-emerald-700 truncate px-2">{dwgFile.name}</p>
+                  <p className="text-[10px] text-emerald-500 mt-1">{(dwgFile.size / 1024).toFixed(0)} KB</p>
+                </>
+              ) : (
+                <>
+                  <Upload size={24} className="mx-auto text-slate-300 mb-2" />
+                  <p className="text-xs font-semibold text-slate-600">DWG / DXF Drawing</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Click to browse</p>
+                </>
+              )}
+            </button>
+
+            {/* PDF Spec */}
+            <input ref={specRef} type="file" accept=".pdf,.docx,.doc" className="hidden" onChange={(e) => setSpecFile(e.target.files?.[0] ?? null)} />
+            <button
+              type="button"
+              onClick={() => specRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${specFile ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:border-blue-400 hover:bg-blue-50'}`}
+            >
+              {specFile ? (
+                <>
+                  <CheckCircle2 size={24} className="mx-auto text-blue-500 mb-2" />
+                  <p className="text-xs font-bold text-blue-700 truncate px-2">{specFile.name}</p>
+                  <p className="text-[10px] text-blue-500 mt-1">{(specFile.size / 1024).toFixed(0)} KB</p>
+                </>
+              ) : (
+                <>
+                  <FileText size={24} className="mx-auto text-slate-300 mb-2" />
+                  <p className="text-xs font-semibold text-slate-600">PDF / DOCX Specification</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Click to browse</p>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+            <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+            {error}
+          </div>
+        )}
+
+        {/* Submit */}
+        <button
+          onClick={handleSubmit}
           disabled={isProcessing}
-          className="flex items-center gap-2 bg-ms-emerald hover:bg-emerald-600 disabled:bg-slate-800 text-black px-6 py-3 rounded-sm font-bold uppercase text-[10px] tracking-widest transition-all shadow-xl shadow-ms-emerald/20"
+          className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white py-4 rounded-xl font-bold uppercase text-sm tracking-widest transition-all shadow-lg shadow-blue-600/20"
         >
-          {isProcessing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} 
-          {isProcessing ? 'Processing...' : 'Execute Fusion Engine'}
+          {isProcessing ? (
+            <><Loader2 size={18} className="animate-spin" /> Submitting…</>
+          ) : (
+            <><Play size={18} /> Start Estimation Pipeline</>
+          )}
         </button>
       </div>
-      
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 mb-10">
-        
-        {/* DUAL UPLOAD ZONE */}
-        <div className="space-y-6">
-          <input type="file" ref={drawingsInputRef} className="hidden" accept=".dwg,.dxf" onChange={(e) => handleFileChange('drawings', e)} />
-          <div 
-            onClick={() => drawingsInputRef.current?.click()}
-            className={`bg-ms-panel border-2 border-dashed p-8 rounded text-center transition-all cursor-pointer group ${drawingsFile ? 'border-ms-emerald bg-ms-emerald/5' : 'border-ms-border hover:border-ms-emerald'}`}
-          >
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-4 flex items-center justify-center gap-2">
-              <Upload size={14} className={drawingsFile ? 'text-ms-emerald' : 'text-slate-600'} /> 1. Upload Drawings (CAD/DWG)
-            </h3>
-            <p className={`text-sm font-bold ${drawingsFile ? 'text-white' : 'text-slate-400'} group-hover:text-ms-emerald transition-colors`}>
-              {drawingsFile ? drawingsFile.name : 'Click or drag .DWG files'}
-            </p>
-            {drawingsFile && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-ms-emerald text-[10px] font-black uppercase tracking-widest">
-                <CheckCircle2 size={12} /> Ready for Fusion
-              </div>
-            )}
-            {!drawingsFile && <p className="text-[10px] text-slate-600 mt-2 font-mono uppercase">Extracts Quantities, Dimensions & Blocks</p>}
-          </div>
-
-          <input type="file" ref={specsInputRef} className="hidden" accept=".pdf" onChange={(e) => handleFileChange('specs', e)} />
-          <div 
-            onClick={() => specsInputRef.current?.click()}
-            className={`bg-ms-panel border-2 border-dashed p-8 rounded text-center transition-all cursor-pointer group ${specsFile ? 'border-ms-amber bg-ms-amber/5' : 'border-ms-border hover:border-ms-amber'}`}
-          >
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-4 flex items-center justify-center gap-2">
-              <FileText size={14} className={specsFile ? 'text-ms-amber' : 'text-slate-600'} /> 2. Upload Specifications (PDF/Word)
-            </h3>
-            <p className={`text-sm font-bold ${specsFile ? 'text-white' : 'text-slate-400'} group-hover:text-ms-amber transition-colors`}>
-              {specsFile ? specsFile.name : 'Click or drag .PDF files'}
-            </p>
-            {specsFile && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-ms-amber text-[10px] font-black uppercase tracking-widest">
-                <CheckCircle2 size={12} /> Ready for Fusion
-              </div>
-            )}
-            {!specsFile && <p className="text-[10px] text-slate-600 mt-2 font-mono uppercase">Extracts U-Values, Finishes & Hardware Brands</p>}
-          </div>
-        </div>
-
-        {/* UAE PRICING MATRIX */}
-        <div className="bg-ms-panel border border-ms-border p-8 flex flex-col h-full rounded-sm shadow-2xl">
-          <h3 className="text-[10px] font-bold uppercase tracking-widest text-ms-emerald mb-6 flex items-center gap-2 border-b border-ms-border pb-4 italic">
-            <Settings size={14} className="text-ms-emerald" /> UAE True-Cost Matrix
-          </h3>
-          
-          <div className="space-y-8 flex-1">
-            {/* Supplier Margins */}
-            <div>
-              <h4 className="text-[9px] font-black uppercase text-slate-500 mb-4 tracking-wider">Supplier Margins (Live Negotiation)</h4>
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Billet Premium (USD/MT)</label>
-                  <input type="number" value={pricing.billetPremium} onChange={e => setPricing({...pricing, billetPremium: Number(e.target.value)})} className="w-full bg-ms-dark border border-ms-border rounded-sm p-3 text-sm font-mono text-ms-emerald focus:outline-none focus:border-ms-emerald transition-all" />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Extrusion Cost (AED/KG)</label>
-                  <input type="number" value={pricing.extrusionMargin} onChange={e => setPricing({...pricing, extrusionMargin: Number(e.target.value)})} className="w-full bg-ms-dark border border-ms-border rounded-sm p-3 text-sm font-mono text-ms-emerald focus:outline-none focus:border-ms-emerald transition-all" />
-                </div>
-              </div>
-            </div>
-
-            {/* Dynamic Overheads */}
-            <div>
-              <h4 className="text-[9px] font-black uppercase text-slate-500 mb-4 tracking-wider mt-2">Dynamic Overhead Profile (%)</h4>
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Admin Overhead %</label>
-                  <input type="number" value={pricing.adminPct} onChange={e => setPricing({...pricing, adminPct: Number(e.target.value)})} className="w-full bg-ms-dark border border-ms-border rounded-sm p-3 text-sm font-mono text-white focus:outline-none focus:border-ms-emerald transition-all" />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Factory Overhead %</label>
-                  <input type="number" value={pricing.factoryPct} onChange={e => setPricing({...pricing, factoryPct: Number(e.target.value)})} className="w-full bg-ms-dark border border-ms-border rounded-sm p-3 text-sm font-mono text-white focus:outline-none focus:border-ms-emerald transition-all" />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Risk Contingency %</label>
-                  <input type="number" value={pricing.riskPct} onChange={e => setPricing({...pricing, riskPct: Number(e.target.value)})} className="w-full bg-ms-dark border border-ms-border rounded-sm p-3 text-sm font-mono text-white focus:outline-none focus:border-ms-emerald transition-all" />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-2">Target Profit %</label>
-                  <input type="number" value={pricing.profitPct} onChange={e => setPricing({...pricing, profitPct: Number(e.target.value)})} className="w-full bg-ms-dark border border-ms-border rounded-sm p-3 text-sm font-mono text-white focus:outline-none focus:border-ms-emerald transition-all" />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* RFI Warning Example */}
-      <div className="bg-ms-amber/5 border border-ms-amber/20 p-5 rounded-sm flex items-start gap-4 shadow-sm">
-        <AlertCircle size={20} className="text-ms-amber mt-0.5 shrink-0 animate-pulse" />
-        <div>
-          <h4 className="text-[11px] font-black text-ms-amber uppercase tracking-widest">System RFI Generated</h4>
-          <p className="text-xs font-mono text-slate-400 mt-2 leading-relaxed">
-            [DWG_LAYER_A-102] indicates System <span className="font-bold text-white">"SD-01"</span> (Sliding Door). 
-            <br/>[PDF_SPEC_SECTION_08410] is missing Hardware Brand requirement. 
-            <br/>Status flagged as <span className="bg-ms-amber text-black px-2 py-0.5 rounded font-black ml-1">RFI_REQUIRED</span>
-          </p>
-        </div>
-      </div>
-      
     </div>
   );
 };

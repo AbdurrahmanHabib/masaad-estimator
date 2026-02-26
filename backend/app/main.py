@@ -50,10 +50,13 @@ class Database:
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
 
-        for i in range(5):
+        for i in range(3):
             try:
-                logger.info(f"Connecting to database (attempt {i+1}/5)...")
-                self.pool = await asyncpg.create_pool(dsn=url, min_size=5, max_size=20)
+                logger.info(f"Connecting to database (attempt {i+1}/3)...")
+                self.pool = await asyncpg.create_pool(
+                    dsn=url, min_size=2, max_size=20,
+                    timeout=5.0, command_timeout=10.0,
+                )
                 async with self.pool.acquire() as conn:
                     await conn.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')
                     try:
@@ -64,10 +67,10 @@ class Database:
                 return
             except Exception as e:
                 logger.error(f"DB connection failed: {e}")
-                if i < 4:
-                    await asyncio.sleep(2 ** i)
+                if i < 2:
+                    await asyncio.sleep(2)
                 else:
-                    logger.warning("Could not connect after 5 attempts — continuing without DB")
+                    logger.warning("Could not connect after 3 attempts — continuing without DB")
 
     async def disconnect(self):
         if self.pool:
