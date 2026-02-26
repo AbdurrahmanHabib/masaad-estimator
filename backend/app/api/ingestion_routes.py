@@ -88,7 +88,7 @@ async def new_project(
 
     # --- Create Project ---
     project = Project(
-        id=uuid.UUID(estimate_id[:32].ljust(32, "0")),  # deterministic project UUID from estimate
+        id=str(uuid.uuid4()),
         tenant_id=uuid.UUID(tenant_id) if tenant_id else None,
         name=project_name,
         client_name=client_name,
