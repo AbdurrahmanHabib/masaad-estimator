@@ -14,6 +14,7 @@ Public API (backward-compatible):
 """
 from __future__ import annotations
 
+import os
 import re
 import logging
 from dataclasses import dataclass, field
@@ -634,6 +635,49 @@ class ProjectScope:
         }
 
 
+# ── PDF VECTOR DETECTION ─────────────────────────────────────────────────────
+
+def _pdf_has_vector_content(pdf_path: str) -> bool:
+    """
+    Detect whether a PDF contains vector drawing content (lines, paths, rects)
+    vs. only raster images (renders, photos, scanned pages).
+
+    Uses pdfplumber to inspect page objects. Returns True if any page has
+    meaningful vector geometry (lines, rects, curves) beyond trivial decoration.
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        logger.warning("pdfplumber not installed — skipping PDF vector check")
+        return False
+
+    if not pdf_path or not os.path.isfile(pdf_path):
+        return False
+
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages[:10]:  # Check first 10 pages max
+                lines = page.lines or []
+                rects = page.rects or []
+                curves = page.curves or []
+                # Count meaningful vector objects (exclude trivial borders/frames)
+                vector_count = len(lines) + len(rects) + len(curves)
+                if vector_count > 15:
+                    return True
+                # Also check for text-based dimension annotations
+                text = page.extract_text() or ""
+                # Dimension patterns: "1200mm", "2.4m", "1200 x 2400"
+                dim_matches = re.findall(
+                    r'\b\d{2,5}\s*(?:mm|m)\b|\b\d+\s*x\s*\d+\b', text, re.IGNORECASE
+                )
+                if dim_matches and vector_count > 5:
+                    return True
+        return False
+    except Exception as e:
+        logger.warning(f"PDF vector check failed for {pdf_path}: {e}")
+        return False
+
+
 # ── SCOPE IDENTIFICATION ENGINE ───────────────────────────────────────────────
 
 class ScopeIdentificationEngine:
@@ -662,6 +706,65 @@ class ScopeIdentificationEngine:
             mapped = entry.get("mapped_internal_type", "").strip()
             if raw and mapped:
                 self.consultant_dict[raw] = mapped
+
+    # ── NO-VECTOR FAILSAFE ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def check_vector_data_available(
+        dwg_extraction: dict,
+        has_dwg_files: bool = False,
+        spec_pdf_paths: list = None,
+    ) -> dict:
+        """
+        Pre-check: detect if uploaded data contains measurable CAD geometry.
+
+        Returns dict:
+            {"has_vectors": True/False, "reason": str, "should_halt": bool}
+
+        If the PDF contains ONLY raster images (renders) and NO vector data,
+        AND no .dwg is provided, the pipeline MUST halt with NEEDS_INFO.
+        """
+        result = {"has_vectors": False, "reason": "", "should_halt": False}
+
+        # 1. If DWG files were uploaded, vectors are available
+        if has_dwg_files:
+            result["has_vectors"] = True
+            result["reason"] = "DWG/DXF files provided — vector geometry available"
+            return result
+
+        # 2. Check if DWG extraction produced usable geometry
+        if dwg_extraction:
+            layers = dwg_extraction.get("layers_data", {})
+            blocks = dwg_extraction.get("blocks", [])
+            polylines = dwg_extraction.get("polylines", [])
+            lines = dwg_extraction.get("lines", [])
+            panels = dwg_extraction.get("panels", [])
+            openings = dwg_extraction.get("openings", [])
+
+            entity_count = len(blocks) + len(polylines) + len(lines) + len(panels) + len(openings)
+            layer_count = len(layers)
+
+            if entity_count > 5 or layer_count > 2:
+                result["has_vectors"] = True
+                result["reason"] = f"DWG extraction contains {entity_count} entities across {layer_count} layers"
+                return result
+
+        # 3. Check PDF specs for vector content (not just raster images)
+        if spec_pdf_paths:
+            for pdf_path in (spec_pdf_paths or []):
+                if _pdf_has_vector_content(pdf_path):
+                    result["has_vectors"] = True
+                    result["reason"] = f"Vector content detected in {os.path.basename(pdf_path)}"
+                    return result
+
+        # NO vector data anywhere — halt
+        result["should_halt"] = True
+        result["reason"] = (
+            "No measurable CAD geometry detected. The uploaded PDFs contain only "
+            "raster images (renders/photos). Please upload .dwg files or vector PDFs "
+            "to generate accurate quantities."
+        )
+        return result
 
     # ── Main entry point ──────────────────────────────────────────────────────
 

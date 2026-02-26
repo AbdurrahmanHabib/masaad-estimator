@@ -5,9 +5,13 @@ import {
   Building2,
   Calculator,
   ShieldCheck,
-  Loader2
+  Loader2,
+  FileText,
+  Save,
+  CheckCircle,
 } from 'lucide-react';
 import CatalogUploader from '../../components/Settings/CatalogUploader';
+import { apiGet, apiPut } from '../../lib/api';
 
 export default function SettingsDashboard() {
   const [marketVars, setMarketVars] = useState({ lmeRate: 2450.00, billetPremium: 450.00 });
@@ -18,10 +22,60 @@ export default function SettingsDashboard() {
   });
   const [isUploading, setIsUploading] = useState<{payroll?: boolean, expenses?: boolean}>({});
 
+  // Company Profile state
+  const [companyProfile, setCompanyProfile] = useState({
+    company_name: 'Madinat Al Saada Aluminium & Glass Works LLC',
+    company_address: '',
+    company_phone: '',
+    company_email: '',
+    company_po_box: '',
+    company_cr_number: '',
+    company_trn: '',
+    report_header_text: '',
+    report_footer_text: '',
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+
   const payrollInputRef = useRef<HTMLInputElement>(null);
   const expensesInputRef = useRef<HTMLInputElement>(null);
 
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+  // Load company profile
+  useEffect(() => {
+    apiGet<Record<string, any>>('/api/settings/tenant')
+      .then((data) => {
+        if (!data) return;
+        setCompanyProfile(prev => ({
+          ...prev,
+          company_name: data.company_name || prev.company_name,
+          company_address: data.company_address || '',
+          company_phone: data.company_phone || '',
+          company_email: data.company_email || '',
+          company_po_box: data.company_po_box || '',
+          company_cr_number: data.company_cr_number || '',
+          company_trn: data.company_trn || '',
+          report_header_text: data.report_header_text || '',
+          report_footer_text: data.report_footer_text || '',
+        }));
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveCompanyProfile = async () => {
+    setProfileSaving(true);
+    setProfileSaved(false);
+    try {
+      await apiPut('/api/settings/tenant', companyProfile);
+      setProfileSaved(true);
+      setTimeout(() => setProfileSaved(false), 3000);
+    } catch (err: any) {
+      alert(err.message || 'Failed to save company profile');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   useEffect(() => {
     fetch(`${API_URL}/api/settings/current-rates`)
@@ -249,6 +303,63 @@ export default function SettingsDashboard() {
           </div>
         </div>
 
+      </div>
+
+      {/* COMPANY PROFILE & PROPOSAL SETTINGS */}
+      <div className="bg-white border border-[#e2e8f0] rounded-md shadow-sm p-6">
+        <div className="flex items-center justify-between mb-6 border-b border-[#e2e8f0] pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-slate-50 rounded-md flex items-center justify-center">
+              <FileText size={17} className="text-[#002147]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-[#002147]">Company Profile & Proposal Settings</h3>
+              <p className="text-[10px] text-[#64748b]">These details appear on letters, proposals, and reports</p>
+            </div>
+          </div>
+          <button
+            onClick={saveCompanyProfile}
+            disabled={profileSaving}
+            className="flex items-center gap-2 px-4 py-2 bg-[#002147] hover:bg-[#1e3a5f] text-white rounded-md text-xs font-semibold transition-all disabled:opacity-50"
+          >
+            {profileSaving ? <Loader2 size={14} className="animate-spin" /> : profileSaved ? <CheckCircle size={14} /> : <Save size={14} />}
+            {profileSaving ? 'Saving...' : profileSaved ? 'Saved' : 'Save Changes'}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {[
+            { key: 'company_name', label: 'Company Name', placeholder: 'Madinat Al Saada Aluminium & Glass Works LLC' },
+            { key: 'company_address', label: 'Address', placeholder: 'Industrial Area, Ajman, UAE' },
+            { key: 'company_phone', label: 'Phone', placeholder: '+971-6-XXX-XXXX' },
+            { key: 'company_email', label: 'Email', placeholder: 'info@madinatalsaada.ae' },
+            { key: 'company_po_box', label: 'P.O. Box', placeholder: 'P.O. Box XXXX' },
+            { key: 'company_cr_number', label: 'Commercial Registration (CR)', placeholder: 'CR-XXXXXX' },
+            { key: 'company_trn', label: 'Tax Registration Number (TRN)', placeholder: '100XXXXXXXXX' },
+            { key: 'report_header_text', label: 'Report Header Text', placeholder: 'Ajman, UAE | Tel: +971-6-XXX-XXXX | www.madinatalsaada.ae' },
+          ].map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <label className="block text-[10px] font-semibold text-[#64748b] uppercase tracking-wider mb-1.5">{label}</label>
+              <input
+                type="text"
+                value={(companyProfile as any)[key] || ''}
+                onChange={(e) => setCompanyProfile(prev => ({ ...prev, [key]: e.target.value }))}
+                placeholder={placeholder}
+                className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-2.5 px-3 text-sm text-[#1e293b] focus:ring-2 focus:ring-[#002147]/20 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
+              />
+            </div>
+          ))}
+          <div className="md:col-span-2">
+            <label className="block text-[10px] font-semibold text-[#64748b] uppercase tracking-wider mb-1.5">Report Footer Text</label>
+            <input
+              type="text"
+              value={companyProfile.report_footer_text}
+              onChange={(e) => setCompanyProfile(prev => ({ ...prev, report_footer_text: e.target.value }))}
+              placeholder="Custom footer text for PDF reports"
+              className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-2.5 px-3 text-sm text-[#1e293b] focus:ring-2 focus:ring-[#002147]/20 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

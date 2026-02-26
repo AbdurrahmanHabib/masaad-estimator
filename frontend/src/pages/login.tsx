@@ -116,10 +116,10 @@ export default function LoginPage() {
               className="w-16 h-16 object-contain"
             />
             <div className="text-center">
-              <h1 className="text-base font-bold text-[#d4a017] uppercase tracking-wider">
+              <h1 className="text-base font-bold text-white uppercase tracking-wider">
                 Madinat Al Saada
               </h1>
-              <p className="text-[10px] text-white/70 font-medium uppercase tracking-[0.25em] mt-0.5">
+              <p className="text-[10px] text-[#94a3b8] font-medium uppercase tracking-[0.25em] mt-0.5">
                 Aluminium & Glass Works
               </p>
             </div>
@@ -130,7 +130,7 @@ export default function LoginPage() {
                 onClick={() => { setTab('login'); setError(null); setSuccess(null); }}
                 className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-widest rounded-md transition-all ${
                   tab === 'login'
-                    ? 'bg-[#d4a017] text-[#002147]'
+                    ? 'bg-white text-[#002147]'
                     : 'text-white/60 hover:text-white'
                 }`}
               >
@@ -140,7 +140,7 @@ export default function LoginPage() {
                 onClick={() => { setTab('register'); setError(null); setSuccess(null); }}
                 className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-widest rounded-md transition-all ${
                   tab === 'register'
-                    ? 'bg-[#d4a017] text-[#002147]'
+                    ? 'bg-white text-[#002147]'
                     : 'text-white/60 hover:text-white'
                 }`}
               >
@@ -179,7 +179,7 @@ export default function LoginPage() {
                     required
                     autoComplete="email"
                     placeholder="you@example.com"
-                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
+                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#94a3b8]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                   />
                 </div>
 
@@ -195,7 +195,7 @@ export default function LoginPage() {
                       required
                       autoComplete="current-password"
                       placeholder="--------"
-                      className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 pr-12 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
+                      className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 pr-12 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#94a3b8]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                     />
                     <button
                       type="button"
@@ -284,7 +284,7 @@ export default function LoginPage() {
                     required
                     autoComplete="name"
                     placeholder="Your full name"
-                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
+                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#94a3b8]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                   />
                 </div>
 
@@ -299,7 +299,7 @@ export default function LoginPage() {
                     required
                     autoComplete="email"
                     placeholder="you@example.com"
-                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
+                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#94a3b8]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                   />
                 </div>
 
@@ -316,7 +316,7 @@ export default function LoginPage() {
                       autoComplete="new-password"
                       placeholder="Min 8 characters"
                       minLength={8}
-                      className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 pr-12 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
+                      className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 pr-12 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#94a3b8]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                     />
                     <button
                       type="button"
@@ -352,7 +352,10 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-6 text-center text-[10px] text-white/50 font-medium">
-          &copy; {new Date().getFullYear()} Madinat Al Saada Group. All rights reserved.
+          &copy; {new Date().getFullYear()} Madinat Al Saada Aluminium & Glass Works LLC
+        </p>
+        <p className="mt-1 text-center text-[8px] text-white/25 tracking-widest uppercase">
+          Powered by Masaad Systems Architect
         </p>
       </div>
     </div>

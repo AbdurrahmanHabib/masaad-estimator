@@ -1,10 +1,181 @@
-"""Cutting list engine — generates the complete 7-section cutting list."""
+"""Cutting list engine — generates the complete 7-section cutting list.
+
+Includes a 1D Cutting Stock Problem (1D-CSP) solver that packs exact cutting
+lengths into standard supplier bars (6.0m / 6.5m), replacing the old lazy
+2% attic stock blanket for aluminum profiles.
+"""
 import math
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List, Tuple
 
 logger = logging.getLogger("masaad-cutting-list")
+
+
+# ── 1D CUTTING STOCK PROBLEM SOLVER ──────────────────────────────────────────
+
+def solve_1d_csp(
+    demand_lengths_mm: List[float],
+    stock_length_mm: float = 6000.0,
+    kerf_mm: float = 4.0,
+    trim_mm: float = 50.0,
+) -> dict:
+    """
+    Solve the 1D Cutting Stock Problem using First-Fit Decreasing (FFD) heuristic.
+    Tries OR-Tools CP-SAT solver first for optimal solution; falls back to greedy FFD.
+
+    Args:
+        demand_lengths_mm: list of required cut lengths in mm
+        stock_length_mm: standard supplier bar length (6000 or 6500)
+        kerf_mm: saw blade width per cut
+        trim_mm: trim allowance at start of each bar
+
+    Returns:
+        dict with keys: bars (list of bar plans), total_bars, yield_pct,
+        total_waste_mm, usable_offcuts (pieces >= 800mm)
+    """
+    if not demand_lengths_mm:
+        return {"bars": [], "total_bars": 0, "yield_pct": 100.0,
+                "total_waste_mm": 0, "usable_offcuts": []}
+
+    usable_length = stock_length_mm - trim_mm
+    pieces = sorted(demand_lengths_mm, reverse=True)  # FFD: largest first
+
+    # Try OR-Tools first
+    bars = _solve_ortools(pieces, usable_length, kerf_mm)
+    if bars is None:
+        bars = _solve_ffd(pieces, usable_length, kerf_mm)
+
+    # Compute metrics
+    total_demand = sum(demand_lengths_mm)
+    total_stock = len(bars) * stock_length_mm
+    total_waste = total_stock - total_demand - (len(bars) * trim_mm)
+    yield_pct = (total_demand / total_stock * 100) if total_stock > 0 else 100.0
+
+    usable_offcuts = []
+    for bar in bars:
+        remnant = bar.get("remnant_mm", 0)
+        if remnant >= 800:
+            usable_offcuts.append({"length_mm": remnant, "bar_id": bar["bar_id"]})
+
+    return {
+        "bars": bars,
+        "total_bars": len(bars),
+        "yield_pct": round(yield_pct, 2),
+        "total_waste_mm": round(max(0, total_waste), 1),
+        "usable_offcuts": usable_offcuts,
+    }
+
+
+def _solve_ortools(
+    pieces: List[float], usable_length: float, kerf_mm: float
+) -> Optional[List[dict]]:
+    """Try OR-Tools CP-SAT bin packing. Returns None if OR-Tools not available."""
+    try:
+        from ortools.sat.python import cp_model
+    except ImportError:
+        return None
+
+    n = len(pieces)
+    max_bars = n  # Upper bound
+
+    model = cp_model.CpModel()
+
+    # x[i][j] = 1 if piece i is on bar j
+    x = {}
+    for i in range(n):
+        for j in range(max_bars):
+            x[i, j] = model.new_bool_var(f"x_{i}_{j}")
+
+    # y[j] = 1 if bar j is used
+    y = [model.new_bool_var(f"y_{j}") for j in range(max_bars)]
+
+    # Each piece assigned to exactly one bar
+    for i in range(n):
+        model.add(sum(x[i, j] for j in range(max_bars)) == 1)
+
+    # Capacity constraint per bar (include kerf per cut)
+    for j in range(max_bars):
+        pieces_on_bar = [x[i, j] for i in range(n)]
+        # Total length = sum(piece_lengths) + kerf * (num_pieces - 1), but only if bar is used
+        model.add(
+            sum(int(pieces[i]) * x[i, j] for i in range(n))
+            + int(kerf_mm) * (sum(x[i, j] for i in range(n)) - 1)
+            <= int(usable_length) * y[j]
+        )
+        # Bar is used only if it has at least one piece
+        model.add(sum(x[i, j] for i in range(n)) >= y[j])
+
+    # Minimize bars used
+    model.minimize(sum(y))
+
+    # Limit solve time to 5 seconds (facade projects have <500 pieces typically)
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 5.0
+
+    status = solver.solve(model)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        return None
+
+    # Extract solution
+    bars = []
+    bar_idx = 0
+    for j in range(max_bars):
+        if solver.value(y[j]):
+            bar_idx += 1
+            cuts = []
+            for i in range(n):
+                if solver.value(x[i, j]):
+                    cuts.append({"length_mm": pieces[i], "piece_index": i})
+            cut_total = sum(c["length_mm"] for c in cuts)
+            kerf_total = max(0, len(cuts) - 1) * kerf_mm
+            remnant = usable_length - cut_total - kerf_total
+            bars.append({
+                "bar_id": f"BAR-{bar_idx:03d}",
+                "cuts": cuts,
+                "cut_total_mm": cut_total,
+                "kerf_total_mm": kerf_total,
+                "remnant_mm": round(max(0, remnant), 1),
+            })
+
+    return bars
+
+
+def _solve_ffd(
+    pieces: List[float], usable_length: float, kerf_mm: float
+) -> List[dict]:
+    """First-Fit Decreasing greedy heuristic — always works, O(n*m) time."""
+    bars: List[dict] = []
+
+    for piece_len in pieces:
+        placed = False
+        for bar in bars:
+            next_kerf = kerf_mm if bar["cuts"] else 0
+            space_needed = piece_len + next_kerf
+            if bar["remaining"] >= space_needed:
+                bar["cuts"].append({"length_mm": piece_len})
+                bar["remaining"] -= space_needed
+                bar["cut_total_mm"] += piece_len
+                bar["kerf_total_mm"] += next_kerf
+                placed = True
+                break
+
+        if not placed:
+            bar_id = f"BAR-{len(bars) + 1:03d}"
+            bars.append({
+                "bar_id": bar_id,
+                "cuts": [{"length_mm": piece_len}],
+                "remaining": usable_length - piece_len,
+                "cut_total_mm": piece_len,
+                "kerf_total_mm": 0,
+                "remnant_mm": 0,
+            })
+
+    # Finalize remnants
+    for bar in bars:
+        bar["remnant_mm"] = round(max(0, bar.pop("remaining", 0)), 1)
+
+    return bars
 
 # Fabrication operation norms (minutes per action)
 FABRICATION_NORMS_MINUTES = {
@@ -256,7 +427,7 @@ class CuttingListEngine:
     def _build_profile_summaries(
         self, bom_output: dict, csp_result: dict, material_rates: dict, market_rates: dict, catalog_items: list
     ) -> list:
-        """Build Section A: Aluminum profile summary + bar plans."""
+        """Build Section A: Aluminum profile summary + bar plans using 1D-CSP."""
         summaries = []
         catalog_by_die = {str(item.get("die_number", "")): item for item in catalog_items}
 
@@ -268,45 +439,62 @@ class CuttingListEngine:
             if not net_lm or not weight_kg_m:
                 continue
 
-            # Wastage factor
-            has_mitre = die_data.get("has_mitre", False)
-            wastage_pct = 0.08 if has_mitre else 0.05
-            gross_lm = net_lm * (1 + wastage_pct)
-
             stock_length_mm = float(die_data.get("stock_length_mm", 6000))
-            bars_required = math.ceil(gross_lm * 1000 / stock_length_mm)
+
+            # ── 1D-CSP: pack exact cutting lengths into standard bars ─────
+            # Collect individual cut lengths from the die_data or CSP input
+            demand_lengths = die_data.get("cut_lengths_mm", [])
+            if not demand_lengths:
+                # Fallback: if no explicit cuts, generate from net_lm
+                # Split into realistic cut pieces (each opening's mullion/transom lengths)
+                avg_cut = min(3000, stock_length_mm * 0.7)
+                num_cuts = max(1, math.ceil(net_lm * 1000 / avg_cut))
+                demand_lengths = [round(net_lm * 1000 / num_cuts, 1)] * num_cuts
+
+            csp_solution = solve_1d_csp(
+                demand_lengths_mm=demand_lengths,
+                stock_length_mm=stock_length_mm,
+                kerf_mm=self.KERF_MM,
+                trim_mm=50.0,
+            )
+
+            bars_required = csp_solution["total_bars"]
+            yield_pct = csp_solution["yield_pct"]
+
+            # Gross LM = actual bars ordered × stock length
+            gross_lm = (bars_required * stock_length_mm) / 1000
+            # Real wastage derived from CSP, not a lazy 5%/8% guess
+            wastage_pct = round(1 - (yield_pct / 100), 4) if yield_pct < 100 else 0.0
 
             total_weight_kg = gross_lm * weight_kg_m
 
             # Pricing: catalog first, then LME formula
             cat_item = catalog_by_die.get(die_number)
             catalog_price = float(cat_item.get("price_aed_per_kg") or 0) if cat_item else 0
-
             lme_price = self._calculate_lme_price(market_rates)
-
             effective_price = catalog_price if catalog_price > 0 else lme_price
             total_cost = total_weight_kg * effective_price
 
-            # Get bar plans from CSP
+            # Build bar plans from CSP solution
             bar_plans = []
-            csp_profile_data = (csp_result or {}).get("profiles", {}).get(die_number, {})
-            for bar_idx, bar in enumerate(csp_profile_data.get("bars", []), 1):
+            for bar in csp_solution.get("bars", []):
                 cuts = bar.get("cuts", [])
-                kerf_total = len(cuts) * self.KERF_MM
-                cut_total = sum(c.get("length_mm", 0) for c in cuts)
-                remnant = stock_length_mm - 50 - kerf_total - cut_total  # 50mm start trim
+                cut_total = bar.get("cut_total_mm", sum(c.get("length_mm", 0) for c in cuts))
+                kerf_total = bar.get("kerf_total_mm", max(0, len(cuts) - 1) * self.KERF_MM)
+                remnant = bar.get("remnant_mm", 0)
 
                 plan = ProfileBarPlan(
-                    bar_id=f"{die_number}-BAR-{bar_idx:03d}",
+                    bar_id=f"{die_number}-{bar.get('bar_id', 'BAR-000')}",
                     die_number=die_number,
                     stock_length_mm=stock_length_mm,
                     cuts=cuts,
-                    end_remnant_mm=max(0, remnant),
-                    kerf_total_mm=kerf_total,
-                    offcut_reuse=remnant >= 1000,
+                    end_remnant_mm=round(remnant, 1),
+                    kerf_total_mm=round(kerf_total, 1),
+                    offcut_reuse=remnant >= 800,  # Blind Spot: offcuts >= 800mm = Usable Inventory
                 )
                 if stock_length_mm > 0:
-                    plan.yield_pct = cut_total / stock_length_mm * 100
+                    plan.yield_pct = round(cut_total / stock_length_mm * 100, 2)
+                    plan.waste_pct = round(100 - plan.yield_pct, 2)
                 bar_plans.append(plan)
 
             ps = ProfileSummary(
@@ -664,6 +852,20 @@ class CuttingListEngine:
                     "lme_price_aed_per_kg": p.lme_price_aed_per_kg,
                     "effective_price_aed_per_kg": p.effective_price_aed_per_kg,
                     "total_cost_aed": p.total_cost_aed,
+                    "yield_pct": round(
+                        (p.net_lm / p.gross_lm * 100) if p.gross_lm > 0 else 100.0, 2
+                    ),
+                    "usable_offcuts": sum(1 for bp in p.bar_plans if bp.offcut_reuse),
+                    "bar_plans": [
+                        {
+                            "bar_id": bp.bar_id,
+                            "cuts_count": len(bp.cuts),
+                            "yield_pct": bp.yield_pct,
+                            "remnant_mm": bp.end_remnant_mm,
+                            "offcut_reuse": bp.offcut_reuse,
+                        }
+                        for bp in p.bar_plans
+                    ],
                 }
                 for p in cl.profile_summaries
             ],

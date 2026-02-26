@@ -11,9 +11,10 @@ import {
   Plus,
   FileText,
   Loader2,
+  Trash2,
 } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
-import { apiGet } from '../lib/api';
+import { apiGet, apiDelete } from '../lib/api';
 
 // Types
 
@@ -84,6 +85,17 @@ export default function Dashboard() {
 
     fetchData();
   }, []);
+
+  const handleDelete = async (estimateId: string, projectName?: string) => {
+    const name = projectName || estimateId.slice(0, 12);
+    if (!window.confirm(`Delete "${name}"? This action cannot be undone.`)) return;
+    try {
+      await apiDelete(`/api/v1/estimates/${estimateId}`);
+      setRecentEstimates(prev => prev.filter(e => e.estimate_id !== estimateId));
+    } catch (err: any) {
+      alert(err.message || 'Delete failed');
+    }
+  };
 
   const firstName = user?.full_name?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'Admin';
   const activeProjects = summary?.total_projects ?? summary?.active_processing ?? recentEstimates.length;
@@ -198,12 +210,21 @@ export default function Dashboard() {
                         {est.progress_pct !== undefined ? `${est.progress_pct}%` : '--'}
                       </td>
                       <td className="py-3 px-6 text-right">
-                        <Link
-                          href={`/estimate/${est.estimate_id}`}
-                          className="text-xs text-[#002147] hover:text-[#1e3a5f] font-medium transition-colors"
-                        >
-                          Open
-                        </Link>
+                        <div className="flex items-center justify-end gap-3">
+                          <Link
+                            href={`/estimate/${est.estimate_id}`}
+                            className="text-xs text-[#002147] hover:text-[#1e3a5f] font-medium transition-colors"
+                          >
+                            Open
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(est.estimate_id, est.project_name)}
+                            className="p-1 text-[#94a3b8] hover:text-red-500 transition-colors rounded hover:bg-red-50"
+                            title="Delete estimate"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

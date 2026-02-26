@@ -24,6 +24,49 @@ SIGHTLINE_DEDUCTIONS = {
 GLASS_DENSITY_KG_M2_PER_MM = 2.5
 
 
+# Aluminum weight per LM (kg/m) by system type — fallback when no catalog match
+ALUMINUM_WEIGHT_NORMS = {
+    "Curtain Wall (Stick)": 12.5,    # kg/sqm of facade area
+    "Curtain Wall (Unitised)": 14.0,
+    "Window - Casement": 4.8,        # kg/lm of perimeter
+    "Window - Fixed": 3.5,
+    "Window - Sliding": 5.2,
+    "Door - Single Swing": 6.5,
+    "Door - Double Swing": 6.5,
+    "Structural Glazing": 8.0,
+    "Shopfront": 10.0,
+    "default": 5.0,
+}
+
+# Gasket length multiplier (lm of gasket per lm of opening perimeter)
+GASKET_MULTIPLIERS = {
+    "Curtain Wall (Stick)": 2.0,     # inner + outer gasket run
+    "Curtain Wall (Unitised)": 2.2,
+    "Window - Casement": 1.5,
+    "Window - Fixed": 1.0,
+    "Window - Sliding": 1.8,
+    "Door - Single Swing": 1.5,
+    "Door - Double Swing": 1.5,
+    "Structural Glazing": 0.5,       # minimal — silicone joint
+    "Shopfront": 1.8,
+    "default": 1.5,
+}
+
+# Hardware sets per opening (number of hardware units)
+HARDWARE_SETS_NORMS = {
+    "Curtain Wall (Stick)": 0,        # no operable hardware
+    "Curtain Wall (Unitised)": 0,
+    "Window - Casement": 1,           # 1 handle + 1 hinge pair + 1 lock
+    "Window - Fixed": 0,
+    "Window - Sliding": 1,            # 1 roller set + 1 lock
+    "Door - Single Swing": 1,         # 1 handle set + 1 closer + 1 hinge set + 1 lock
+    "Door - Double Swing": 2,         # 2× hardware sets
+    "Structural Glazing": 0,
+    "Shopfront": 1,
+    "default": 0,
+}
+
+
 @dataclass
 class OpeningRecord:
     opening_id: str
@@ -43,6 +86,11 @@ class OpeningRecord:
     glass_type: str = ""
     glass_thickness_mm: float = 6.0
     glass_pane_weight_kg: float = 0.0
+    # MODULE 3: Forensic deliverable fields
+    aluminum_weight_kg: float = 0.0
+    gasket_length_lm: float = 0.0
+    hardware_sets: int = 0
+    perimeter_lm: float = 0.0
     remarks: str = ""
 
 
@@ -140,6 +188,22 @@ class OpeningScheduleEngine:
             gt = glass_thickness or 6.0
             glass_weight = net_glazed * gt * GLASS_DENSITY_KG_M2_PER_MM
 
+            # MODULE 3: Forensic fields — aluminum weight, gasket length, hardware sets
+            perimeter_mm = 2 * (width + height) if width > 0 and height > 0 else 0
+            perimeter_lm = perimeter_mm / 1000.0
+
+            al_norm = ALUMINUM_WEIGHT_NORMS.get(system_type, ALUMINUM_WEIGHT_NORMS["default"])
+            # For area-based systems (curtain wall), use sqm; for unit-based, use perimeter
+            if "Curtain Wall" in system_type or "Structural" in system_type:
+                aluminum_weight = gross_area * al_norm
+            else:
+                aluminum_weight = perimeter_lm * al_norm
+
+            gasket_mult = GASKET_MULTIPLIERS.get(system_type, GASKET_MULTIPLIERS["default"])
+            gasket_length = perimeter_lm * gasket_mult
+
+            hw_sets = HARDWARE_SETS_NORMS.get(system_type, HARDWARE_SETS_NORMS["default"])
+
             record = OpeningRecord(
                 opening_id=opening_id,
                 system_type=system_type,
@@ -158,6 +222,10 @@ class OpeningScheduleEngine:
                 glass_type=glass_type_from_spec or "6mm Clear Tempered",
                 glass_thickness_mm=gt,
                 glass_pane_weight_kg=round(glass_weight, 2),
+                aluminum_weight_kg=round(aluminum_weight, 2),
+                gasket_length_lm=round(gasket_length, 2),
+                hardware_sets=hw_sets,
+                perimeter_lm=round(perimeter_lm, 3),
             )
 
             schedule.schedule.append(record)
@@ -319,16 +387,25 @@ class OpeningScheduleEngine:
 
     def to_dict(self, schedule: OpeningSchedule) -> dict:
         """Serialize OpeningSchedule to dict for JSON storage."""
+        # MODULE 3: Compute forensic totals
+        total_al_weight = sum(r.aluminum_weight_kg * r.count for r in schedule.schedule)
+        total_gasket = sum(r.gasket_length_lm * r.count for r in schedule.schedule)
+        total_hw_sets = sum(r.hardware_sets * r.count for r in schedule.schedule)
+        total_glass_weight = sum(r.glass_pane_weight_kg * r.count for r in schedule.schedule)
+
         return {
             "schedule": [
                 {
                     "opening_id": r.opening_id,
+                    "mark_id": r.item_code,
                     "system_type": r.system_type,
                     "system_series": r.system_series,
+                    "qty": r.count,
                     "width_mm": r.width_mm,
                     "height_mm": r.height_mm,
                     "gross_area_sqm": r.gross_area_sqm,
                     "net_glazed_sqm": r.net_glazed_sqm,
+                    "perimeter_lm": r.perimeter_lm,
                     "elevation": r.elevation,
                     "floor": r.floor,
                     "count": r.count,
@@ -338,6 +415,10 @@ class OpeningScheduleEngine:
                     "glass_type": r.glass_type,
                     "glass_thickness_mm": r.glass_thickness_mm,
                     "glass_pane_weight_kg": r.glass_pane_weight_kg,
+                    # MODULE 3: Forensic deliverable fields
+                    "aluminum_weight_kg": r.aluminum_weight_kg,
+                    "gasket_length_lm": r.gasket_length_lm,
+                    "hardware_sets": r.hardware_sets,
                 }
                 for r in schedule.schedule
             ],
@@ -345,6 +426,10 @@ class OpeningScheduleEngine:
                 "total_openings": schedule.total_openings,
                 "total_gross_sqm": round(schedule.total_gross_sqm, 2),
                 "total_glazed_sqm": round(schedule.total_glazed_sqm, 2),
+                "total_aluminum_weight_kg": round(total_al_weight, 2),
+                "total_gasket_length_lm": round(total_gasket, 2),
+                "total_hardware_sets": total_hw_sets,
+                "total_glass_weight_kg": round(total_glass_weight, 2),
                 "by_type": schedule.by_type,
                 "by_elevation": {k: round(v, 2) for k, v in schedule.by_elevation.items()},
                 "by_floor": {k: round(v, 2) for k, v in schedule.by_floor.items()},

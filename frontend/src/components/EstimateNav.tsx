@@ -45,7 +45,7 @@ export default function EstimateNav({ estimateId, status }: EstimateNavProps) {
               <Icon size={14} />
               {label}
               {isApprove && status === 'REVIEW_REQUIRED' && (
-                <span className="w-2 h-2 rounded-full bg-[#d4a017] ml-1" />
+                <span className="w-2 h-2 rounded-full bg-amber-500 ml-1" />
               )}
             </span>
           </Link>

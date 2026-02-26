@@ -164,9 +164,17 @@ class CostingEngine:
         self,
         financial_rates: Optional[Dict[str, Any]] = None,
         project_config: Optional[Dict[str, Any]] = None,
+        tenant_settings: Optional[Dict[str, Any]] = None,
     ) -> None:
         rates = financial_rates or {}
         cfg = project_config or {}
+        ts = tenant_settings or {}
+
+        # ── MODULE 1: Tenant-based financial parameters ──────────────────
+        self.base_currency: str = str(ts.get("base_currency", "AED"))
+        self.monthly_factory_overhead: float = float(ts.get("monthly_factory_overhead", 85_000.0))
+        self.default_factory_burn_rate: float = float(ts.get("default_factory_burn_rate", 13.00))
+        self.company_name: str = str(ts.get("company_name", "Madinat Al Saada"))
 
         # LME & aluminium pricing
         self.lme_usd_mt: float = float(rates.get("lme_usd_mt", _DEFAULT_LME_USD_MT))
@@ -176,9 +184,11 @@ class CostingEngine:
         self.usd_aed: float = float(rates.get("usd_aed", _DEFAULT_USD_AED))
         self.anodizing_aed_kg: float = float(rates.get("anodizing_aed_kg", 18.0))
 
-        # Labour
+        # Labour — prefer tenant burn rate, then config/rates overrides, then hardcoded
         self.factory_hourly_rate: float = float(
-            cfg.get("factory_hourly_rate", rates.get("factory_hourly_rate", _BURN_RATE_AED_HR))
+            cfg.get("factory_hourly_rate",
+                     rates.get("factory_hourly_rate",
+                               ts.get("default_factory_burn_rate", _BURN_RATE_AED_HR)))
         )
         self.site_hourly_rate: float = float(
             cfg.get("site_hourly_rate", rates.get("site_hourly_rate", 75.0))
@@ -191,6 +201,20 @@ class CostingEngine:
 
         # International mode
         self.is_international: bool = bool(cfg.get("is_international", False))
+
+        # ── MODULE 2: Execution strategy ─────────────────────────────────
+        # SUPPLY_ONLY | IN_HOUSE_INSTALL | OUTSOURCED_SUBCONTRACTOR
+        self.execution_strategy: str = str(
+            cfg.get("execution_strategy", "IN_HOUSE_INSTALL")
+        ).upper()
+
+        # Subcontractor rate (AED/sqm flat when outsourced)
+        self.subcontractor_rate_aed_sqm: float = float(
+            cfg.get("subcontractor_rate_aed_sqm", 220.0)
+        )
+
+        # Project duration (days) — for dynamic labor formula
+        self.project_duration_days: int = int(cfg.get("project_duration_days", 90))
 
         # Provisional sum defaults (AED)
         self.provisional_gpr: float = float(cfg.get("provisional_gpr_aed", 15_000.0))
@@ -510,6 +534,101 @@ class CostingEngine:
         }
 
     # ------------------------------------------------------------------
+    # 5b. MODULE 1: Dynamic tenant-based labor cost
+    # ------------------------------------------------------------------
+
+    def calculate_dynamic_labor_cost(
+        self,
+        estimated_manhours: float,
+        project_duration_days: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Dynamic labor cost formula per MODULE 1 spec:
+          Total_Labor = (duration_days / 30 * monthly_factory_overhead)
+                      + (estimated_manhours * default_factory_burn_rate)
+
+        Uses tenant_settings values injected at __init__.
+        """
+        duration = project_duration_days or self.project_duration_days
+        overhead_component = (duration / 30.0) * self.monthly_factory_overhead
+        manhour_component = estimated_manhours * self.default_factory_burn_rate
+        total = overhead_component + manhour_component
+
+        return {
+            "project_duration_days": duration,
+            "monthly_factory_overhead": round(self.monthly_factory_overhead, 2),
+            "overhead_component_aed": round(overhead_component, 2),
+            "estimated_manhours": round(estimated_manhours, 2),
+            "burn_rate_aed_hr": round(self.default_factory_burn_rate, 4),
+            "manhour_component_aed": round(manhour_component, 2),
+            "total_labor_cost_aed": round(total, 2),
+            "currency": self.base_currency,
+        }
+
+    # ------------------------------------------------------------------
+    # 5c. MODULE 2: Subcontractor cost calculation
+    # ------------------------------------------------------------------
+
+    def calculate_subcontractor_cost(
+        self,
+        total_facade_sqm: float,
+        rate_override: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        When execution_strategy == OUTSOURCED_SUBCONTRACTOR, calculate
+        subcontractor lump-sum instead of direct labor.
+        """
+        rate = rate_override or self.subcontractor_rate_aed_sqm
+        total = total_facade_sqm * rate
+        return {
+            "category": "SUBCONTRACTOR",
+            "total_facade_sqm": round(total_facade_sqm, 2),
+            "rate_aed_sqm": round(rate, 2),
+            "total_cost_aed": round(total, 2),
+        }
+
+    # ------------------------------------------------------------------
+    # 5d. MODULE 2: International export logistics line items
+    # ------------------------------------------------------------------
+
+    def calculate_export_logistics(
+        self,
+        total_weight_kg: float,
+        container_count: int = 1,
+    ) -> List[Dict[str, Any]]:
+        """
+        When is_international=True, inject SITE-EXPORT-PACK and
+        SITE-CONTAINER-LOADING BOM categories.
+        """
+        items: List[Dict[str, Any]] = []
+        if not self.is_international:
+            return items
+
+        # Export packing: 8 AED/kg for crating + protective wrapping
+        packing_cost = total_weight_kg * 8.0
+        items.append({
+            "category": "SITE-EXPORT-PACK",
+            "description": "Export crating, protective wrapping, moisture barrier",
+            "quantity": round(total_weight_kg, 2),
+            "unit": "kg",
+            "unit_rate_aed": 8.0,
+            "total_cost_aed": round(packing_cost, 2),
+        })
+
+        # Container loading: 3,500 AED per 40ft container
+        loading_cost = container_count * 3_500.0
+        items.append({
+            "category": "SITE-CONTAINER-LOADING",
+            "description": f"Container loading — {container_count}× 40ft HC",
+            "quantity": container_count,
+            "unit": "container",
+            "unit_rate_aed": 3_500.0,
+            "total_cost_aed": round(loading_cost, 2),
+        })
+
+        return items
+
+    # ------------------------------------------------------------------
     # 6. Full estimate rollup
     # ------------------------------------------------------------------
 
@@ -597,29 +716,50 @@ class CostingEngine:
         hardware_cost = hardware_result["total_cost_aed"]
 
         # --- Fabrication ---
-        # Merge all fabrication operations across items
-        merged_ops: Dict[str, float] = {}
-        for f in fab_items:
-            ops = f.get("operations", {})
-            for k, v in ops.items():
-                merged_ops[k] = merged_ops.get(k, 0.0) + float(v)
-        fab_result = self.calculate_fabrication_cost(merged_ops)
-        fab_cost = fab_result["total_cost_aed"]
+        # MODULE 2: SUPPLY_ONLY strips fabrication; OUTSOURCED strips direct labor
+        fab_result: Dict[str, Any] = {"total_cost_aed": 0.0, "operations": {}}
+        fab_cost = 0.0
+        if self.execution_strategy != "SUPPLY_ONLY":
+            merged_ops: Dict[str, float] = {}
+            for f in fab_items:
+                ops = f.get("operations", {})
+                for k, v in ops.items():
+                    merged_ops[k] = merged_ops.get(k, 0.0) + float(v)
+            fab_result = self.calculate_fabrication_cost(merged_ops)
+            fab_cost = fab_result["total_cost_aed"]
 
         # --- Installation ---
         building_height_m = float(
             (project_config or {}).get("building_height_m", 10.0)
         )
-        install_bom: List[Dict[str, Any]] = []
-        for inst in install_items:
-            install_bom.append({
-                "install_type": inst.get("install_type", inst.get("description", "")),
-                "quantity": float(inst.get("quantity", 1)),
-                "height_m": float(inst.get("height_m", building_height_m)),
-                "rate_override": float(inst.get("unit_rate_aed", 0.0)) or None,
-            })
-        install_result = self.calculate_installation_cost(install_bom, building_height_m)
-        install_cost = install_result["total_cost_aed"]
+        install_result: Dict[str, Any] = {"total_cost_aed": 0.0, "line_items": []}
+        install_cost = 0.0
+        subcontractor_result: Optional[Dict[str, Any]] = None
+
+        if self.execution_strategy == "IN_HOUSE_INSTALL":
+            install_bom: List[Dict[str, Any]] = []
+            for inst in install_items:
+                install_bom.append({
+                    "install_type": inst.get("install_type", inst.get("description", "")),
+                    "quantity": float(inst.get("quantity", 1)),
+                    "height_m": float(inst.get("height_m", building_height_m)),
+                    "rate_override": float(inst.get("unit_rate_aed", 0.0)) or None,
+                })
+            install_result = self.calculate_installation_cost(install_bom, building_height_m)
+            install_cost = install_result["total_cost_aed"]
+        elif self.execution_strategy == "OUTSOURCED_SUBCONTRACTOR":
+            # Replace direct labor with subcontractor lump-sum
+            total_facade_sqm = sum(
+                float(i.get("area_sqm", float(i.get("quantity", 0))))
+                for i in bom_items if i.get("category", "").lower() in ("glass", "acp", "installation")
+            )
+            if total_facade_sqm <= 0:
+                total_facade_sqm = sum(
+                    float(i.get("quantity", 0)) for i in install_items
+                )
+            subcontractor_result = self.calculate_subcontractor_cost(total_facade_sqm)
+            install_cost = subcontractor_result["total_cost_aed"]
+        # SUPPLY_ONLY: install_cost stays 0
 
         # --- Other / direct supply items ---
         other_cost = sum(
@@ -627,8 +767,15 @@ class CostingEngine:
             for i in other_items
         )
 
+        # --- MODULE 2: International export logistics ---
+        export_items: List[Dict[str, Any]] = []
+        export_cost = 0.0
+        if self.is_international:
+            export_items = self.calculate_export_logistics(total_weight_kg)
+            export_cost = sum(e["total_cost_aed"] for e in export_items)
+
         # --- Direct cost subtotal ---
-        direct_cost = al_total + glass_cost + hardware_cost + fab_cost + install_cost + other_cost
+        direct_cost = al_total + glass_cost + hardware_cost + fab_cost + install_cost + other_cost + export_cost
 
         # --- Provisional sums (5 Blind Spot Rules) ---
         provisional_sums: Dict[str, float] = {
@@ -667,6 +814,14 @@ class CostingEngine:
         retention_pct = float((project_config or {}).get("retention_pct", 0.10))
         retention_amount = round(selling_price * retention_pct, 2)
 
+        # --- MODULE 1: Dynamic labor cost (parallel computation for reporting) ---
+        estimated_manhours = fab_result.get("total_hours", 0.0) * 60.0 / 60.0  # already in hours
+        dynamic_labor = self.calculate_dynamic_labor_cost(
+            estimated_manhours=estimated_manhours + sum(
+                float(i.get("quantity", 0)) for i in install_items
+            ),
+        )
+
         return {
             "bom_summary": {
                 "aluminium_items": len(aluminium_items),
@@ -676,6 +831,8 @@ class CostingEngine:
                 "installation_items": len(install_items),
                 "other_items": len(other_items),
             },
+            "execution_strategy": self.execution_strategy,
+            "currency": self.base_currency,
             "cost_breakdown": {
                 "aluminium_material_aed": round(al_cost, 2),
                 "attic_stock_2pct_aed": attic_stock_cost,
@@ -684,6 +841,8 @@ class CostingEngine:
                 "hardware_aed": round(hardware_cost, 2),
                 "fabrication_labour_aed": round(fab_cost, 2),
                 "installation_labour_aed": round(install_cost, 2),
+                "subcontractor_aed": subcontractor_result["total_cost_aed"] if subcontractor_result else 0.0,
+                "export_logistics_aed": round(export_cost, 2),
                 "other_aed": round(other_cost, 2),
                 "direct_cost_aed": round(direct_cost, 2),
             },
@@ -710,6 +869,9 @@ class CostingEngine:
             "hardware_detail": hardware_result,
             "fabrication_detail": fab_result,
             "installation_detail": install_result,
+            "subcontractor_detail": subcontractor_result,
+            "export_logistics_detail": export_items if export_items else None,
+            "dynamic_labor_detail": dynamic_labor,
         }
 
     # ------------------------------------------------------------------
@@ -935,3 +1097,9 @@ def _merge_config(engine: CostingEngine, cfg: Dict[str, Any]) -> None:
         engine.factory_hourly_rate = float(cfg["factory_hourly_rate"])
     if "site_hourly_rate" in cfg:
         engine.site_hourly_rate = float(cfg["site_hourly_rate"])
+    if "execution_strategy" in cfg:
+        engine.execution_strategy = str(cfg["execution_strategy"]).upper()
+    if "project_duration_days" in cfg:
+        engine.project_duration_days = int(cfg["project_duration_days"])
+    if "subcontractor_rate_aed_sqm" in cfg:
+        engine.subcontractor_rate_aed_sqm = float(cfg["subcontractor_rate_aed_sqm"])

@@ -371,7 +371,7 @@ function OpeningsSummary({ openings }: { openings: OpeningItem[] }) {
 
   return (
     <div className="bg-gradient-to-r from-[#002147] to-[#1e3a5f] rounded-md p-6 text-white">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#d4a017] mb-4">Openings Summary</h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#94a3b8] mb-4">Openings Summary</h3>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div>
           <div className="text-[10px] text-white/60 font-medium">Total Facade Area</div>
@@ -414,20 +414,22 @@ function OpeningScheduleTable({ openings }: { openings: OpeningItem[] }) {
 
   const totalGlassArea = openings.reduce((sum, o) => sum + (o.glass_area ?? o.glass_area_sqm ?? 0), 0);
   const totalQty = openings.reduce((sum, o) => sum + (o.quantity ?? o.qty ?? 1), 0);
+  const totalAluWeight = openings.reduce((sum, o) => sum + (Number(o.alu_weight_kg ?? o.aluminum_weight_kg ?? 0)), 0);
 
   return (
     <div className="bg-white rounded-md border border-[#e2e8f0] overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-[#002147]">
-            <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Mark ID</th>
-            <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">System Type</th>
-            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Width (mm)</th>
-            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Height (mm)</th>
-            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Qty</th>
-            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Gross Area (sqm)</th>
-            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Glass Area (sqm)</th>
-            <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Floor</th>
+            <th className="text-left py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">Mark ID</th>
+            <th className="text-left py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">System Type</th>
+            <th className="text-right py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">W (mm)</th>
+            <th className="text-right py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">H (mm)</th>
+            <th className="text-right py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">Qty</th>
+            <th className="text-right py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">Area (sqm)</th>
+            <th className="text-left py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">Glass Spec</th>
+            <th className="text-right py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">ALU Wt (kg)</th>
+            <th className="text-left py-2.5 px-3 font-semibold text-white text-xs uppercase tracking-wider">Floor</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[#e2e8f0]">
@@ -436,42 +438,51 @@ function OpeningScheduleTable({ openings }: { openings: OpeningItem[] }) {
             const h = o.height ?? o.height_mm ?? 0;
             const a = o.area ?? o.area_sqm ?? (w > 0 && h > 0 ? (w * h) / 1_000_000 : 0);
             const q = o.quantity ?? o.qty ?? 1;
-            const ga = o.glass_area ?? o.glass_area_sqm ?? 0;
+            const aluWt = Number(o.alu_weight_kg ?? o.aluminum_weight_kg ?? 0);
+            const glassSpec = String(o.glass_spec ?? o.glass_makeup ?? o.glass_type ?? '');
             return (
               <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
-                <td className="py-2 px-4 text-[#1e293b] font-mono text-xs">{o.mark_id || o.opening_id || o.id || `O-${String(i + 1).padStart(2, '0')}`}</td>
-                <td className="py-2 px-4 text-xs">
+                <td className="py-2 px-3 text-[#1e293b] font-mono text-xs">{o.mark_id || o.opening_id || o.id || `O-${String(i + 1).padStart(2, '0')}`}</td>
+                <td className="py-2 px-3 text-xs">
                   {(o.system_type || o.system) ? (
                     <span className="inline-block px-2 py-0.5 bg-blue-50 text-[#002147] rounded-md text-xs border border-blue-200">
                       {o.system_type || o.system}
                     </span>
                   ) : (o.type || o.opening_type || '--')}
                 </td>
-                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{w > 0 ? fmtNum(w, 0) : '--'}</td>
-                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{h > 0 ? fmtNum(h, 0) : '--'}</td>
-                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{q}</td>
-                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{a > 0 ? fmtNum(a, 2) : '--'}</td>
-                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{ga > 0 ? fmtNum(ga, 2) : '--'}</td>
-                <td className="py-2 px-4 text-[#64748b] text-xs">{o.floor ?? '--'}</td>
+                <td className="py-2 px-3 text-right font-mono text-[#1e293b] text-xs">{w > 0 ? fmtNum(w, 0) : '--'}</td>
+                <td className="py-2 px-3 text-right font-mono text-[#1e293b] text-xs">{h > 0 ? fmtNum(h, 0) : '--'}</td>
+                <td className="py-2 px-3 text-right font-mono text-[#1e293b] text-xs">{q}</td>
+                <td className="py-2 px-3 text-right font-mono text-[#1e293b] text-xs">{a > 0 ? fmtNum(a, 2) : '--'}</td>
+                <td className="py-2 px-3 text-xs text-[#1e293b]">
+                  {glassSpec ? (
+                    <span className="inline-block px-1.5 py-0.5 bg-cyan-50 text-cyan-800 rounded text-[10px] border border-cyan-200 max-w-[140px] truncate" title={glassSpec}>
+                      {glassSpec}
+                    </span>
+                  ) : '--'}
+                </td>
+                <td className="py-2 px-3 text-right font-mono text-[#1e293b] text-xs">{aluWt > 0 ? fmtNum(aluWt, 1) : '--'}</td>
+                <td className="py-2 px-3 text-[#64748b] text-xs">{o.floor ?? '--'}</td>
               </tr>
             );
           })}
         </tbody>
         <tfoot>
           <tr className="bg-slate-100 border-t-2 border-[#e2e8f0]">
-            <td colSpan={4} className="py-2.5 px-4 text-xs font-semibold text-[#002147]">
+            <td colSpan={4} className="py-2.5 px-3 text-xs font-semibold text-[#002147]">
               Total: {openings.length} openings
             </td>
-            <td className="py-2.5 px-4 text-right font-mono font-bold text-[#002147] text-xs">
+            <td className="py-2.5 px-3 text-right font-mono font-bold text-[#002147] text-xs">
               {totalQty}
             </td>
-            <td className="py-2.5 px-4 text-right font-mono font-bold text-[#002147] text-xs">
+            <td className="py-2.5 px-3 text-right font-mono font-bold text-[#002147] text-xs">
               {fmtNum(totalArea, 2)}
             </td>
-            <td className="py-2.5 px-4 text-right font-mono font-bold text-[#002147] text-xs">
-              {totalGlassArea > 0 ? fmtNum(totalGlassArea, 2) : '--'}
+            <td className="py-2.5 px-3"></td>
+            <td className="py-2.5 px-3 text-right font-mono font-bold text-[#002147] text-xs">
+              {totalAluWeight > 0 ? fmtNum(totalAluWeight, 1) : '--'}
             </td>
-            <td className="py-2.5 px-4"></td>
+            <td className="py-2.5 px-3"></td>
           </tr>
         </tfoot>
       </table>
@@ -559,7 +570,7 @@ function EngineeringTab({
       {/* Engineering Summary */}
       {summary && (
         <div className="bg-gradient-to-r from-[#002147] to-[#1e3a5f] rounded-md p-6 text-white">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-[#d4a017] mb-4">Engineering Analysis Summary</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-[#94a3b8] mb-4">Engineering Analysis Summary</h3>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
             <div>
               <div className="text-[10px] text-white/60 font-medium">Total Checks</div>
@@ -864,9 +875,9 @@ function FinancialTab({ financial, boqSummary, bomSummary }: { financial: Financ
                 </div>
               )}
               {totalInclVat !== undefined && (
-                <div className="flex justify-between py-4 px-4 border-t-2 border-[#d4a017] bg-[#002147]">
+                <div className="flex justify-between py-4 px-4 border-t-2 border-[#94a3b8] bg-[#002147]">
                   <span className="font-semibold text-white">Total (incl. VAT)</span>
-                  <span className="font-mono font-bold text-lg text-[#d4a017]">{fmtAED(totalInclVat)}</span>
+                  <span className="font-mono font-bold text-lg text-[#94a3b8]">{fmtAED(totalInclVat)}</span>
                 </div>
               )}
             </>
@@ -1278,7 +1289,7 @@ const EstimatePage = () => {
           {currentStatus === 'REVIEW_REQUIRED' && (
             <Link
               href={`/estimate/${id}/approve`}
-              className="px-4 py-2 bg-[#d4a017] hover:bg-[#b8900f] text-[#002147] rounded-md text-xs font-semibold transition-all flex items-center gap-2"
+              className="px-4 py-2 bg-[#002147] hover:bg-[#1e3a5f] text-white rounded-md text-xs font-semibold transition-all flex items-center gap-2"
             >
               <ShieldAlert size={14} /> Approve
             </Link>
@@ -1336,7 +1347,7 @@ const EstimatePage = () => {
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab.key
-                  ? 'border-[#d4a017] text-[#002147]'
+                  ? 'border-[#94a3b8] text-[#002147]'
                   : 'border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-[#e2e8f0]'
               }`}
             >

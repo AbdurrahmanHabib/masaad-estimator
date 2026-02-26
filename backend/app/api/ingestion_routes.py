@@ -3,7 +3,7 @@ import os
 import shutil
 import uuid
 import logging
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,15 @@ router = APIRouter(prefix="/api/ingestion", tags=["Project Ingestion"])
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Accepted file extensions per document category
+CATEGORY_EXTENSIONS = {
+    "dwg_elevations": {".dwg", ".dxf"},
+    "dwg_plans": {".dwg", ".dxf"},
+    "pdf_specifications": {".pdf", ".docx", ".doc"},
+    "supplier_catalogs": {".pdf"},
+    "site_photos": {".jpg", ".jpeg", ".png", ".heic", ".webp", ".tiff"},
+}
+
 
 def _save_upload(file: UploadFile, dest_dir: str) -> str:
     """Save an uploaded file and return its absolute path."""
@@ -29,6 +38,28 @@ def _save_upload(file: UploadFile, dest_dir: str) -> str:
     with open(path, "wb") as fh:
         shutil.copyfileobj(file.file, fh)
     return path
+
+
+def _save_category_files(
+    files: List[UploadFile],
+    category: str,
+    dest_dir: str,
+) -> List[dict]:
+    """Save a list of uploaded files for a given category with extension validation.
+    Returns list of {filename, path, category} dicts."""
+    allowed = CATEGORY_EXTENSIONS.get(category, set())
+    saved = []
+    for f in files:
+        if not f.filename:
+            continue
+        ext = os.path.splitext(f.filename)[-1].lower()
+        if allowed and ext not in allowed:
+            logger.warning(f"Skipping {f.filename}: {ext} not allowed for {category}")
+            continue
+        path = _save_upload(f, os.path.join(dest_dir, category))
+        saved.append({"filename": f.filename, "path": path, "category": category})
+        logger.info(f"Saved [{category}] {f.filename} -> {path}")
+    return saved
 
 
 # ─── New Project (main intake endpoint) ──────────────────────────────────────
@@ -49,26 +80,69 @@ async def new_project(
     estimator_notes: str = Form(""),
     budget_cap_aed: Optional[float] = Form(None),
     delivery_weeks: Optional[int] = Form(None),
+    # Legacy single-file fields (backward compat)
     dwg_file: Optional[UploadFile] = File(None),
     spec_file: Optional[UploadFile] = File(None),
     extra_file: Optional[UploadFile] = File(None),
+    # Document Control Hub: multi-file arrays per category
+    dwg_elevations: List[UploadFile] = File(default=[]),
+    dwg_plans: List[UploadFile] = File(default=[]),
+    pdf_specifications: List[UploadFile] = File(default=[]),
+    supplier_catalogs: List[UploadFile] = File(default=[]),
+    site_photos: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Main project intake endpoint.
-    Accepts DWG + PDF spec (+ optional extra file).
+    Main project intake endpoint — Document Control Hub.
+
+    Accepts files in 5 categorized buckets (multi-file per category):
+      - dwg_elevations:    DWG/DXF elevation drawings
+      - dwg_plans:         DWG/DXF floor plans
+      - pdf_specifications: PDF/DOCX specification documents
+      - supplier_catalogs:  Supplier catalog PDFs
+      - site_photos:        Site photographs (JPG/PNG)
+
+    Also supports legacy single-file fields (dwg_file, spec_file, extra_file)
+    for backward compatibility.
+
     Creates Project + Estimate records, dispatches Celery pipeline.
     Returns estimate_id immediately — client polls /api/ingestion/status/{id}.
     """
-    if not dwg_file and not spec_file:
-        raise HTTPException(400, "At least one file (DWG or PDF spec) is required.")
+    # Check that at least one file was provided (any category)
+    has_legacy = bool(dwg_file and dwg_file.filename) or bool(spec_file and spec_file.filename)
+    has_hub = any(
+        f.filename
+        for bucket in [dwg_elevations, dwg_plans, pdf_specifications, supplier_catalogs, site_photos]
+        for f in bucket
+    )
+    if not has_legacy and not has_hub:
+        raise HTTPException(400, "At least one file is required. Upload DWG drawings, PDF specs, or supplier catalogs.")
 
     estimate_id = str(uuid.uuid4())
     project_dir = os.path.join(UPLOAD_DIR, estimate_id)
     os.makedirs(project_dir, exist_ok=True)
 
-    # --- Save uploaded files ---
+    # --- Save categorized files (Document Control Hub) ---
+    document_manifest: dict = {
+        "dwg_elevations": [],
+        "dwg_plans": [],
+        "pdf_specifications": [],
+        "supplier_catalogs": [],
+        "site_photos": [],
+    }
+
+    for category, file_list in [
+        ("dwg_elevations", dwg_elevations),
+        ("dwg_plans", dwg_plans),
+        ("pdf_specifications", pdf_specifications),
+        ("supplier_catalogs", supplier_catalogs),
+        ("site_photos", site_photos),
+    ]:
+        saved = _save_category_files(file_list, category, project_dir)
+        document_manifest[category].extend(saved)
+
+    # --- Legacy single-file handling (merged into manifest) ---
     dwg_path: Optional[str] = None
     spec_path: Optional[str] = None
     extra_path: Optional[str] = None
@@ -78,20 +152,38 @@ async def new_project(
         if ext not in (".dwg", ".dxf"):
             raise HTTPException(400, "DWG/DXF file required for drawing upload.")
         dwg_path = _save_upload(dwg_file, project_dir)
-        logger.info(f"[{estimate_id}] DWG saved: {dwg_path}")
+        document_manifest["dwg_elevations"].append({"filename": dwg_file.filename, "path": dwg_path, "category": "dwg_elevations"})
+        logger.info(f"[{estimate_id}] Legacy DWG saved: {dwg_path}")
 
     if spec_file and spec_file.filename:
         ext = os.path.splitext(spec_file.filename)[-1].lower()
         if ext not in (".pdf", ".docx", ".doc"):
             raise HTTPException(400, "PDF or DOCX file required for spec upload.")
         spec_path = _save_upload(spec_file, project_dir)
-        logger.info(f"[{estimate_id}] Spec saved: {spec_path}")
+        document_manifest["pdf_specifications"].append({"filename": spec_file.filename, "path": spec_path, "category": "pdf_specifications"})
+        logger.info(f"[{estimate_id}] Legacy spec saved: {spec_path}")
 
     if extra_file and extra_file.filename:
         extra_path = _save_upload(extra_file, project_dir)
         logger.info(f"[{estimate_id}] Extra file saved: {extra_path}")
 
+    # Consolidate drawing paths for the pipeline
+    all_dwg_paths = [
+        f["path"] for f in document_manifest["dwg_elevations"] + document_manifest["dwg_plans"]
+    ]
+    all_spec_paths = [f["path"] for f in document_manifest["pdf_specifications"]]
+    all_catalog_paths = [f["path"] for f in document_manifest["supplier_catalogs"]]
+    all_photo_paths = [f["path"] for f in document_manifest["site_photos"]]
+
+    # Primary paths (backward compat for pipeline state)
+    primary_dwg = all_dwg_paths[0] if all_dwg_paths else dwg_path
+    primary_spec = all_spec_paths[0] if all_spec_paths else spec_path
+
     tenant_id = str(current_user.tenant_id) if current_user.tenant_id else None
+
+    file_counts = {cat: len(files) for cat, files in document_manifest.items() if files}
+    total_files = sum(file_counts.values()) + (1 if extra_path else 0)
+    logger.info(f"[{estimate_id}] Document Control Hub: {total_files} files across {len(file_counts)} categories: {file_counts}")
 
     # --- Create Project ---
     project = Project(
@@ -120,9 +212,17 @@ async def new_project(
         current_step="Queued — waiting for worker",
         reasoning_log=[],
         raw_data_json={
-            "dwg_path": dwg_path,
-            "spec_path": spec_path,
+            # Primary paths (backward compat)
+            "dwg_path": primary_dwg,
+            "spec_path": primary_spec,
             "extra_path": extra_path,
+            # Document Control Hub manifest
+            "document_manifest": document_manifest,
+            "all_dwg_paths": all_dwg_paths,
+            "all_spec_paths": all_spec_paths,
+            "all_catalog_paths": all_catalog_paths,
+            "all_photo_paths": all_photo_paths,
+            # Project metadata
             "project_name": project_name,
             "client_name": client_name,
             "project_location": project_location,
@@ -158,9 +258,16 @@ async def new_project(
         "status": "queued" if worker_available else "queued_no_worker",
         "message": "Processing started. Poll /api/ingestion/status/{estimate_id} for progress.",
         "files_received": {
-            "dwg": os.path.basename(dwg_path) if dwg_path else None,
-            "spec": os.path.basename(spec_path) if spec_path else None,
+            "total": total_files,
+            "by_category": file_counts,
+            # Legacy fields
+            "dwg": os.path.basename(primary_dwg) if primary_dwg else None,
+            "spec": os.path.basename(primary_spec) if primary_spec else None,
             "extra": os.path.basename(extra_path) if extra_path else None,
+        },
+        "document_manifest_summary": {
+            cat: [f["filename"] for f in files]
+            for cat, files in document_manifest.items() if files
         },
     }
 
@@ -238,6 +345,12 @@ async def _run_pipeline_inline(estimate_id: str, user_id: str):
                 pass
 
             raw = estimate.raw_data_json or {}
+            # Collect ALL drawing paths from Document Control Hub manifest
+            all_dwg = raw.get("all_dwg_paths", [])
+            if not all_dwg and raw.get("dwg_path"):
+                all_dwg = [raw["dwg_path"]]
+            all_dwg = [p for p in all_dwg if p]  # Filter None/empty
+
             state = {
                 "estimate_id": estimate_id,
                 "tenant_id": estimate.tenant_id,
@@ -250,7 +363,7 @@ async def _run_pipeline_inline(estimate_id: str, user_id: str):
                 "hitl_pending": False,
                 "hitl_triage_ids": [],
                 "confidence_score": 1.0,
-                "drawing_paths": [raw.get("dwg_path")] if raw.get("dwg_path") else [],
+                "drawing_paths": all_dwg,
                 "spec_text": "",
                 "revision_number": estimate.revision_number or 0,
                 "extracted_openings": [],

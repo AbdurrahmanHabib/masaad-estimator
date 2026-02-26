@@ -15,19 +15,28 @@ from sqlalchemy import select
 
 from app.db import get_db
 from app.api.deps import get_current_user, get_tenant_id
-from app.models.orm_models import User, Estimate, Project
+from app.models.orm_models import User, Estimate, Project, Tenant
 
 router = APIRouter(prefix="/api/reports", tags=["Reports"])
 logger = logging.getLogger("masaad-report-routes")
 
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/downloads")
-COMPANY_NAME = "MADINAT AL SAADA ALUMINIUM & GLASS WORKS LLC"
-COMPANY_SUB = "Ajman, United Arab Emirates  |  Tel: +971-6-XXX-XXXX  |  www.madinatalsaada.ae"
+DEFAULT_COMPANY_NAME = "MADINAT AL SAADA ALUMINIUM & GLASS WORKS LLC"
+DEFAULT_COMPANY_SUB = "Ajman, United Arab Emirates  |  Tel: +971-6-XXX-XXXX  |  www.madinatalsaada.ae"
 VALIDITY_DAYS = 7
 
-# Colors
-NAVY = (15 / 255, 23 / 255, 42 / 255)       # #0f172a
-GOLD = (0.85, 0.65, 0.10)
+
+def _hex_to_rgb(hex_color: str) -> tuple:
+    """Convert '#RRGGBB' to (r, g, b) floats 0-1."""
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return (15 / 255, 23 / 255, 42 / 255)
+    return (int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255)
+
+
+# Default Colors (overridden by tenant settings)
+SILVER = (0.58, 0.64, 0.72)
+GOLD = SILVER  # Legacy alias — brand uses silver/navy, not gold
 DARK_GRAY = (0.2, 0.2, 0.2)
 MID_GRAY = (0.5, 0.5, 0.5)
 LIGHT_GRAY = (0.7, 0.7, 0.7)
@@ -73,12 +82,31 @@ async def generate_estimate_pdf(
             client_name = getattr(project, "client_name", "") or ""
             location = getattr(project, "location_zone", "") or ""
 
+    # Load tenant for white-label branding
+    tenant_settings = {}
+    if estimate.tenant_id:
+        t_result = await db.execute(
+            select(Tenant).where(Tenant.id == estimate.tenant_id)
+        )
+        tenant = t_result.scalar_one_or_none()
+        if tenant:
+            tenant_settings = {
+                "company_name": tenant.company_name,
+                "theme_color_hex": tenant.theme_color_hex,
+                "base_currency": tenant.base_currency,
+                "logo_url": tenant.logo_url,
+                "report_header_text": tenant.report_header_text,
+                "report_footer_text": tenant.report_footer_text,
+            }
+
     state = estimate.state_snapshot or {}
     bom_output = estimate.bom_output_json or {}
     bom_items = bom_output.get("items", state.get("bom_items", []))
     pricing = bom_output.get("summary", state.get("pricing_data", {}))
     opening_schedule = estimate.opening_schedule_json or state.get("opening_schedule", {})
     scope = estimate.project_scope_json or state.get("project_scope", {})
+    engineering_results = getattr(estimate, "engineering_results_json", None) or state.get("engineering_results", {})
+    compliance_results = getattr(estimate, "compliance_results_json", None) or state.get("compliance_results", {})
 
     # Generate PDF
     _ensure_dir()
@@ -92,6 +120,9 @@ async def generate_estimate_pdf(
         bom_items=bom_items,
         pricing=pricing,
         state=state,
+        tenant_settings=tenant_settings,
+        engineering_results=engineering_results,
+        compliance_results=compliance_results,
     )
 
     if not pdf_path or not os.path.exists(pdf_path):
@@ -114,13 +145,25 @@ def _build_estimate_pdf(
     bom_items: list,
     pricing: dict,
     state: dict,
+    tenant_settings: dict = None,
+    engineering_results: dict = None,
+    compliance_results: dict = None,
 ) -> Optional[str]:
-    """Build a full multi-page estimate PDF using ReportLab."""
+    """Build a full multi-page estimate PDF using ReportLab with white-label tenant branding."""
     try:
         from reportlab.pdfgen import canvas as rl_canvas
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import cm
         from reportlab.lib import colors
+
+        # White-label tenant branding
+        ts = tenant_settings or {}
+        company_name = ts.get("company_name", DEFAULT_COMPANY_NAME)
+        company_sub = ts.get("report_header_text", DEFAULT_COMPANY_SUB)
+        theme_hex = ts.get("theme_color_hex", "#0f172a")
+        NAVY = _hex_to_rgb(theme_hex)
+        currency = ts.get("base_currency", "AED")
+        footer_text = ts.get("report_footer_text")
 
         filename = f"Estimate_{estimate_id[:8]}.pdf"
         path = os.path.join(DOWNLOAD_DIR, filename)
@@ -129,14 +172,14 @@ def _build_estimate_pdf(
         page_num = [1]  # mutable for nested functions
 
         def draw_header():
-            """Draw navy header bar with company branding."""
+            """Draw themed header bar with tenant company branding."""
             c.setFillColorRGB(*NAVY)
             c.rect(0, page_h - 3 * cm, page_w, 3 * cm, fill=1, stroke=0)
             c.setFillColorRGB(*WHITE)
             c.setFont("Helvetica-Bold", 13)
-            c.drawString(1.5 * cm, page_h - 1.5 * cm, COMPANY_NAME)
+            c.drawString(1.5 * cm, page_h - 1.5 * cm, company_name)
             c.setFont("Helvetica", 8)
-            c.drawString(1.5 * cm, page_h - 2.1 * cm, COMPANY_SUB)
+            c.drawString(1.5 * cm, page_h - 2.1 * cm, company_sub)
             # Gold accent line
             c.setStrokeColorRGB(*GOLD)
             c.setLineWidth(2)
@@ -148,7 +191,8 @@ def _build_estimate_pdf(
             """Draw footer with page number and date."""
             c.setFillColorRGB(*MID_GRAY)
             c.setFont("Helvetica", 7)
-            c.drawString(1.5 * cm, 0.8 * cm, f"CONFIDENTIAL - {COMPANY_NAME}")
+            ft = footer_text or f"CONFIDENTIAL - {company_name}"
+            c.drawString(1.5 * cm, 0.8 * cm, ft)
             gen_date = datetime.now().strftime("%d %b %Y %H:%M")
             c.drawRightString(page_w - 1.5 * cm, 0.8 * cm, f"Page {page_num[0]}  |  Generated: {gen_date}")
             c.setStrokeColorRGB(*LIGHT_GRAY)
@@ -235,7 +279,7 @@ def _build_estimate_pdf(
         )
         c.drawString(
             2.0 * cm, y - 0.7 * cm,
-            "Subject to revision if LME moves +/-5%. All prices in AED excl. VAT."
+            f"Subject to revision if LME moves +/-5%. All prices in {currency} excl. VAT."
         )
 
         y -= 2.5 * cm
@@ -252,7 +296,7 @@ def _build_estimate_pdf(
             ("Estimate Reference", estimate_id[:8].upper()),
             ("Date Prepared", ref_date),
             ("Price Validity", f"{VALIDITY_DAYS} days (until {validity})"),
-            ("Currency", "AED (United Arab Emirates Dirham)"),
+            ("Currency", f"{currency}"),
         ]
 
         c.setFont("Helvetica", 9)
@@ -313,11 +357,21 @@ def _build_estimate_pdf(
             openings = opening_schedule
 
         if openings:
-            # Table headers
-            col_x = [1.5 * cm, 4.5 * cm, 9.0 * cm, 11.5 * cm, 13.5 * cm, 15.5 * cm]
-            headers = ["Ref", "System Type", "W x H (mm)", "Qty", "Area (sqm)", "Floors"]
+            # Detect if forensic fields are available (MODULE 3)
+            has_forensic = any(
+                op.get("aluminum_weight_kg") or op.get("gasket_length_lm") or op.get("hardware_sets")
+                for op in openings
+            )
 
-            c.setFont("Helvetica-Bold", 8)
+            if has_forensic:
+                # Extended table with forensic fields
+                col_x = [1.5 * cm, 3.2 * cm, 6.0 * cm, 8.5 * cm, 10.0 * cm, 11.5 * cm, 13.2 * cm, 15.0 * cm, 17.0 * cm]
+                headers = ["Mark", "System", "W x H", "Qty", "Area", "Al.kg", "Gasket", "HW", "Floors"]
+            else:
+                col_x = [1.5 * cm, 4.5 * cm, 9.0 * cm, 11.5 * cm, 13.5 * cm, 15.5 * cm]
+                headers = ["Ref", "System Type", "W x H (mm)", "Qty", "Area (sqm)", "Floors"]
+
+            c.setFont("Helvetica-Bold", 7 if has_forensic else 8)
             c.setFillColorRGB(*NAVY)
             for i, h in enumerate(headers):
                 c.drawString(col_x[i], y, h)
@@ -326,12 +380,15 @@ def _build_estimate_pdf(
             c.line(1.5 * cm, y, page_w - 1.5 * cm, y)
             y -= 0.35 * cm
 
-            c.setFont("Helvetica", 8)
+            c.setFont("Helvetica", 7 if has_forensic else 8)
             c.setFillColorRGB(*DARK_GRAY)
+            total_al_kg = 0
+            total_gasket_lm = 0
+            total_hw = 0
             for op in openings:
                 y = check_page(y)
-                ref = str(op.get("id", op.get("ref", "")))[:12]
-                sys_type = str(op.get("system_type", ""))[:20]
+                ref = str(op.get("mark_id", op.get("id", op.get("ref", ""))))[:10]
+                sys_type = str(op.get("system_type", ""))[:15 if has_forensic else 20]
                 w = op.get("width_mm", 0)
                 h_val = op.get("height_mm", 0)
                 qty = op.get("quantity", 1)
@@ -340,10 +397,36 @@ def _build_estimate_pdf(
 
                 c.drawString(col_x[0], y, ref)
                 c.drawString(col_x[1], y, sys_type)
-                c.drawString(col_x[2], y, f"{w} x {h_val}")
+                c.drawString(col_x[2], y, f"{w}x{h_val}")
                 c.drawString(col_x[3], y, str(qty))
-                c.drawString(col_x[4], y, f"{area:.2f}")
-                c.drawString(col_x[5], y, str(floors))
+                c.drawString(col_x[4], y, f"{area:.1f}")
+
+                if has_forensic:
+                    al_kg = float(op.get("aluminum_weight_kg", 0))
+                    gasket = float(op.get("gasket_length_lm", 0))
+                    hw = int(op.get("hardware_sets", 0))
+                    total_al_kg += al_kg
+                    total_gasket_lm += gasket
+                    total_hw += hw
+                    c.drawString(col_x[5], y, f"{al_kg:.1f}")
+                    c.drawString(col_x[6], y, f"{gasket:.1f}")
+                    c.drawString(col_x[7], y, str(hw))
+                    c.drawString(col_x[8], y, str(floors))
+                else:
+                    c.drawString(col_x[5], y, str(floors))
+                y -= 0.35 * cm
+
+            # Totals row for forensic data
+            if has_forensic:
+                y -= 0.1 * cm
+                c.setStrokeColorRGB(*NAVY)
+                c.line(1.5 * cm, y + 0.15 * cm, page_w - 1.5 * cm, y + 0.15 * cm)
+                c.setFont("Helvetica-Bold", 7)
+                c.setFillColorRGB(*NAVY)
+                c.drawString(col_x[0], y, "TOTALS")
+                c.drawString(col_x[5], y, f"{total_al_kg:.1f}")
+                c.drawString(col_x[6], y, f"{total_gasket_lm:.1f}")
+                c.drawString(col_x[7], y, str(total_hw))
                 y -= 0.4 * cm
         else:
             c.setFont("Helvetica-Oblique", 9)
@@ -382,7 +465,7 @@ def _build_estimate_pdf(
                 c.setFont("Helvetica-Bold", 9)
                 c.setFillColorRGB(*NAVY)
                 c.drawString(1.5 * cm, y, cat.title())
-                c.drawRightString(page_w - 1.5 * cm, y, f"AED {cat_total:,.0f}")
+                c.drawRightString(page_w - 1.5 * cm, y, f"{currency} {cat_total:,.0f}")
                 y -= 0.3 * cm
                 c.setStrokeColorRGB(*LIGHT_GRAY)
                 c.line(1.5 * cm, y, page_w - 1.5 * cm, y)
@@ -403,7 +486,7 @@ def _build_estimate_pdf(
                     c.drawString(11.5 * cm, y, f"{qty_val:,.2f} {unit}")
                     c.drawString(14.0 * cm, y, f"{unit_cost:,.2f}")
                     c.setFillColorRGB(*NAVY)
-                    c.drawRightString(page_w - 1.5 * cm, y, f"AED {subtotal:,.0f}")
+                    c.drawRightString(page_w - 1.5 * cm, y, f"{currency} {subtotal:,.0f}")
                     y -= 0.35 * cm
 
                 if len(items) > 15:
@@ -476,7 +559,7 @@ def _build_estimate_pdf(
                 c.setFillColorRGB(*NAVY)
                 c.setFont("Helvetica-Bold", 10)
 
-            c.drawRightString(page_w - 1.5 * cm, y, f"AED {value:,.0f}")
+            c.drawRightString(page_w - 1.5 * cm, y, f"{currency} {value:,.0f}")
             y -= 0.55 * cm
 
         # VAT
@@ -485,13 +568,13 @@ def _build_estimate_pdf(
         c.setFont("Helvetica-Bold", 10)
         c.setFillColorRGB(*GREEN)
         c.drawString(1.5 * cm, y, "VAT (5%)")
-        c.drawRightString(page_w - 1.5 * cm, y, f"AED {vat:,.0f}")
+        c.drawRightString(page_w - 1.5 * cm, y, f"{currency} {vat:,.0f}")
         y -= 0.55 * cm
 
         c.setFillColorRGB(*GOLD)
         c.setFont("Helvetica-Bold", 12)
         c.drawString(1.5 * cm, y, "TOTAL INCLUDING VAT")
-        c.drawRightString(page_w - 1.5 * cm, y, f"AED {total_aed + vat:,.0f}")
+        c.drawRightString(page_w - 1.5 * cm, y, f"{currency} {total_aed + vat:,.0f}")
 
         # ================================================================
         # TERMS & CONDITIONS
@@ -504,7 +587,7 @@ def _build_estimate_pdf(
             "2. Payment Terms: 30% advance upon order confirmation, 30% upon material delivery,",
             "   30% upon installation completion, 10% retention (released after 12 months).",
             "3. Aluminum prices are subject to LME fluctuation clause (+/-5% tolerance).",
-            "4. All prices are in AED (United Arab Emirates Dirham), exclusive of VAT.",
+            f"4. All prices are in {currency}, exclusive of VAT.",
             "5. VAT at 5% will be applied as per UAE Federal Tax Authority regulations.",
             "6. Delivery timeline: To be confirmed upon order, typically 8-12 weeks for materials.",
             "7. Installation duration subject to site readiness and access confirmation.",
@@ -527,6 +610,133 @@ def _build_estimate_pdf(
             c.drawString(2.0 * cm, y, line)
             y -= 0.4 * cm
 
+        # ================================================================
+        # ENGINEERING PROOFS (from physics engine forensic analysis)
+        # ================================================================
+        eng = engineering_results or {}
+        if eng.get("per_opening_checks") or eng.get("summary"):
+            y = new_page()
+            y = section_title(y, "ENGINEERING PROOFS & COMPLIANCE")
+
+            eng_summary = eng.get("summary", {})
+            if eng_summary:
+                summary_rows = [
+                    ("Total Openings Analyzed", str(eng_summary.get("total_openings_checked", 0))),
+                    ("Wind Load Compliance", f"{eng_summary.get('wind_load_pass_count', 0)}/{eng_summary.get('total_openings_checked', 0)} PASS"),
+                    ("Deflection Compliance", f"{eng_summary.get('deflection_pass_count', 0)}/{eng_summary.get('total_openings_checked', 0)} PASS"),
+                    ("Glass Stress Compliance", f"{eng_summary.get('glass_stress_pass_count', 0)}/{eng_summary.get('total_openings_checked', 0)} PASS"),
+                    ("Thermal U-Value Compliance", f"{eng_summary.get('thermal_pass_count', 0)}/{eng_summary.get('total_openings_checked', 0)} PASS"),
+                ]
+                c.setFont("Helvetica", 9)
+                for label, value in summary_rows:
+                    y = check_page(y)
+                    c.setFillColorRGB(*DARK_GRAY)
+                    c.drawString(2.0 * cm, y, f"{label}:")
+                    # Color code pass/fail
+                    if "PASS" in value:
+                        parts = value.split("/")
+                        passed = int(parts[0]) if parts[0].isdigit() else 0
+                        total_str = parts[1].split(" ")[0] if len(parts) > 1 else "0"
+                        total_checks = int(total_str) if total_str.isdigit() else 0
+                        if passed == total_checks and total_checks > 0:
+                            c.setFillColorRGB(*GREEN)
+                        else:
+                            c.setFillColorRGB(*RED)
+                    else:
+                        c.setFillColorRGB(*NAVY)
+                    c.setFont("Helvetica-Bold", 9)
+                    c.drawString(9.0 * cm, y, value)
+                    c.setFont("Helvetica", 9)
+                    y -= 0.45 * cm
+
+            # Per-opening check matrix (compact)
+            per_opening = eng.get("per_opening_checks", [])
+            if per_opening:
+                y -= 0.5 * cm
+                y = check_page(y, 3.0)
+                c.setFont("Helvetica-Bold", 9)
+                c.setFillColorRGB(*NAVY)
+                c.drawString(1.5 * cm, y, "PER-OPENING CHECK MATRIX")
+                y -= 0.3 * cm
+                c.setStrokeColorRGB(*GOLD)
+                c.line(1.5 * cm, y, page_w - 1.5 * cm, y)
+                y -= 0.4 * cm
+
+                # Headers
+                chk_cols = [1.5 * cm, 4.0 * cm, 7.5 * cm, 10.5 * cm, 13.5 * cm, 16.0 * cm]
+                chk_hdrs = ["Opening", "System", "Wind", "Deflect.", "Glass", "Thermal"]
+                c.setFont("Helvetica-Bold", 7)
+                for i, h in enumerate(chk_hdrs):
+                    c.drawString(chk_cols[i], y, h)
+                y -= 0.35 * cm
+
+                c.setFont("Helvetica", 7)
+                for chk in per_opening[:25]:  # Cap at 25 rows
+                    y = check_page(y)
+                    c.setFillColorRGB(*DARK_GRAY)
+                    c.drawString(chk_cols[0], y, str(chk.get("opening_id", ""))[:10])
+                    c.drawString(chk_cols[1], y, str(chk.get("system_type", ""))[:15])
+                    # Pass/fail indicators
+                    for idx, field in enumerate(["wind_load_pass", "deflection_pass", "glass_stress_pass", "thermal_pass"]):
+                        val = chk.get(field)
+                        if val is True:
+                            c.setFillColorRGB(*GREEN)
+                            c.drawString(chk_cols[2 + idx], y, "PASS")
+                        elif val is False:
+                            c.setFillColorRGB(*RED)
+                            c.drawString(chk_cols[2 + idx], y, "FAIL")
+                        else:
+                            c.setFillColorRGB(*MID_GRAY)
+                            c.drawString(chk_cols[2 + idx], y, "N/A")
+                    y -= 0.3 * cm
+
+                if len(per_opening) > 25:
+                    c.setFont("Helvetica-Oblique", 7)
+                    c.setFillColorRGB(*MID_GRAY)
+                    c.drawString(2.0 * cm, y, f"... and {len(per_opening) - 25} more openings (see full report)")
+                    y -= 0.3 * cm
+
+        # ================================================================
+        # COMPLIANCE RESULTS (thermal/acoustic/fire)
+        # ================================================================
+        comp = compliance_results or {}
+        if comp:
+            if not (eng.get("per_opening_checks") or eng.get("summary")):
+                y = new_page()
+            else:
+                y -= 0.8 * cm
+                y = check_page(y, 3.0)
+
+            y = section_title(y, "COMPLIANCE CERTIFICATION SUMMARY")
+
+            comp_rows = []
+            if comp.get("thermal_compliance"):
+                tc = comp["thermal_compliance"]
+                comp_rows.append(("Thermal (ASHRAE 90.1)", tc.get("status", "N/A"), tc.get("u_value", "")))
+            if comp.get("acoustic_compliance"):
+                ac = comp["acoustic_compliance"]
+                comp_rows.append(("Acoustic Rating", ac.get("status", "N/A"), ac.get("rw_db", "")))
+            if comp.get("fire_compliance"):
+                fc = comp["fire_compliance"]
+                comp_rows.append(("Fire Rating (UAE Civil Defence)", fc.get("status", "N/A"), fc.get("rating_minutes", "")))
+
+            c.setFont("Helvetica", 9)
+            for label, status, detail in comp_rows:
+                y = check_page(y)
+                c.setFillColorRGB(*DARK_GRAY)
+                c.drawString(2.0 * cm, y, f"{label}:")
+                if "PASS" in str(status).upper() or "COMPLIANT" in str(status).upper():
+                    c.setFillColorRGB(*GREEN)
+                elif "FAIL" in str(status).upper():
+                    c.setFillColorRGB(*RED)
+                else:
+                    c.setFillColorRGB(*NAVY)
+                c.setFont("Helvetica-Bold", 9)
+                detail_str = f" ({detail})" if detail else ""
+                c.drawString(9.0 * cm, y, f"{status}{detail_str}")
+                c.setFont("Helvetica", 9)
+                y -= 0.45 * cm
+
         # Signature block
         y -= 1.5 * cm
         y = check_page(y, 4.0)
@@ -546,7 +756,7 @@ def _build_estimate_pdf(
 
         c.setFont("Helvetica-Bold", 9)
         c.setFillColorRGB(*GOLD)
-        c.drawString(left_x, y, COMPANY_NAME)
+        c.drawString(left_x, y, company_name)
         y -= 2.0 * cm
 
         c.setStrokeColorRGB(*NAVY)
@@ -616,8 +826,20 @@ async def download_drawings_package(
         if project:
             project_name = project.name or project_name
 
+    # Load tenant for branding
+    tenant_settings = {}
+    if estimate.tenant_id:
+        t_result = await db.execute(select(Tenant).where(Tenant.id == estimate.tenant_id))
+        t = t_result.scalar_one_or_none()
+        if t:
+            tenant_settings = {
+                "company_name": t.company_name,
+                "theme_color_hex": t.theme_color_hex,
+                "logo_url": t.logo_url,
+            }
+
     _ensure_dir()
-    engine = VisualDraftingEngine()
+    engine = VisualDraftingEngine(tenant_settings=tenant_settings)
     drawing_result = engine.generate_all(estimate_id, openings, project_name=project_name)
     return drawing_result
 

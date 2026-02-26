@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db import get_db
 from app.api.deps import require_role, get_tenant_id
-from app.models.orm_models import SmartProfileDie as SmartProfileDieORM, User
+from app.models.orm_models import SmartProfileDie as SmartProfileDieORM, User, Estimate, Project, Tenant
 from app.services.drafting.smart_die import (
     DraftingRecipe, SmartProfileDie as SmartProfileDiePydantic
 )
@@ -120,6 +120,69 @@ async def compile_section(
         filename=filename,
         background=None,  # File cleanup handled after response
     )
+
+
+@router.post("/generate-drawings/{estimate_id}")
+async def generate_visual_drawings(
+    estimate_id: str,
+    user: User = Depends(require_role("Senior_Estimator")),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    MODULE 4: Generate visual drafting deliverables (elevation markup, shop drawings, ACP layouts).
+    Returns paths to generated PDF files.
+    """
+    from app.services.drafting.visual_engine import VisualDraftingEngine
+
+    # Load estimate + project
+    est_result = await db.execute(
+        select(Estimate).where(Estimate.id == estimate_id)
+    )
+    estimate = est_result.scalar_one_or_none()
+    if not estimate:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+
+    proj_result = await db.execute(
+        select(Project).where(Project.id == estimate.project_id)
+    )
+    project = proj_result.scalar_one_or_none()
+    project_name = project.name if project else ""
+
+    # Load tenant for branding
+    tenant_settings = {}
+    try:
+        t_result = await db.execute(
+            select(Tenant).where(Tenant.id == estimate.tenant_id)
+        )
+        tenant = t_result.scalar_one_or_none()
+        if tenant:
+            tenant_settings = {
+                "company_name": tenant.company_name,
+                "theme_color_hex": tenant.theme_color_hex,
+                "logo_url": tenant.logo_url,
+            }
+    except Exception:
+        pass
+
+    # Get openings from estimate
+    opening_schedule = estimate.opening_schedule_json or {}
+    openings = opening_schedule.get("schedule", [])
+    if not openings:
+        raise HTTPException(status_code=400, detail="No opening schedule found for this estimate")
+
+    engine = VisualDraftingEngine(tenant_settings=tenant_settings)
+    drawings_result = engine.generate_all(
+        estimate_id=estimate_id,
+        openings=openings,
+        scope=estimate.project_scope_json,
+        project_name=project_name,
+    )
+
+    # Store in estimate
+    estimate.drawings_json = drawings_result
+    await db.commit()
+
+    return drawings_result
 
 
 @router.get("/dies")

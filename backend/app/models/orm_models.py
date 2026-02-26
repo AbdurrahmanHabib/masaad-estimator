@@ -28,6 +28,26 @@ class Tenant(Base):
     subscription_tier: Mapped[str] = mapped_column(String(50), default="professional")
     subscription_status: Mapped[str] = mapped_column(String(50), default="active")
     trial_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # ── Multi-Tenant Financial Engine (MODULE 1) ───────────────────────────
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False, default="Madinat Al Saada")
+    theme_color_hex: Mapped[str] = mapped_column(String(10), nullable=False, default="#002147")
+    base_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="AED")
+    monthly_factory_overhead: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("85000.00")
+    )
+    default_factory_burn_rate: Mapped[Decimal] = mapped_column(
+        Numeric(10, 4), nullable=False, default=Decimal("13.00")
+    )
+    # White-label PDF branding
+    report_header_text: Mapped[Optional[str]] = mapped_column(String(255))
+    report_footer_text: Mapped[Optional[str]] = mapped_column(String(255))
+    # Company contact details (used in letters, proposals, reports)
+    company_address: Mapped[Optional[str]] = mapped_column(String(500))
+    company_phone: Mapped[Optional[str]] = mapped_column(String(50))
+    company_email: Mapped[Optional[str]] = mapped_column(String(255))
+    company_po_box: Mapped[Optional[str]] = mapped_column(String(50))
+    company_cr_number: Mapped[Optional[str]] = mapped_column(String(50))
+    company_trn: Mapped[Optional[str]] = mapped_column(String(50))  # Tax Registration Number
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     users: Mapped[list["User"]] = relationship("User", back_populates="tenant")
     projects: Mapped[list["Project"]] = relationship("Project", back_populates="tenant")
@@ -231,6 +251,11 @@ class Project(Base):
     is_international: Mapped[bool] = mapped_column(Boolean, default=False)
     consultant_name: Mapped[Optional[str]] = mapped_column(String(255))
     contract_type: Mapped[str] = mapped_column(String(50), default="Supply + Fabricate + Install")
+    # MODULE 2: Project Execution Strategy — drives labor/logistics logic
+    # SUPPLY_ONLY | IN_HOUSE_INSTALL | OUTSOURCED_SUBCONTRACTOR
+    execution_strategy: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="IN_HOUSE_INSTALL"
+    )
     complexity_multiplier: Mapped[float] = mapped_column(Numeric(4, 2), default=1.0)
     scope_boundary: Mapped[str] = mapped_column(String(100), default="Panels + Substructure")
     created_by: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"))
@@ -261,6 +286,9 @@ class Estimate(Base):
     procurement_json: Mapped[Optional[dict]] = mapped_column(JSONB)
     installation_plan_json: Mapped[Optional[dict]] = mapped_column(JSONB)
     fabrication_plan_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    # MODULE 3: Forensic deliverables — engineering proofs stored per estimate
+    engineering_results_json: Mapped[Optional[dict]] = mapped_column(JSONB)
+    compliance_results_json: Mapped[Optional[dict]] = mapped_column(JSONB)
     reasoning_log: Mapped[Optional[list]] = mapped_column(JSONB)
     lme_snapshot_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     lme_usd_at_estimate: Mapped[Optional[float]] = mapped_column(Numeric(12, 4))

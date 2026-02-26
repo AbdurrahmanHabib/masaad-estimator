@@ -56,7 +56,7 @@ export default function ApprovePage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiGet<EstimateData>(`/api/ingestion/estimate/${id}`);
+      const data = await apiGet<EstimateData>(`/api/v1/estimates/${id}`);
       setEstimate(data);
     } catch (e: any) {
       setError(e.message || 'Failed to load estimate data');
@@ -72,9 +72,11 @@ export default function ApprovePage() {
     setApproving(true);
     setError(null);
     try {
-      await apiPost('/api/ingestion/approve', { estimate_id: id });
-      setSuccess('Estimate approved successfully. Report generation will begin shortly.');
+      await apiPost(`/api/v1/estimates/${id}/approve`, {});
+      setSuccess('Estimate approved successfully. Redirecting to approved summary...');
       await fetchEstimate();
+      // Redirect to estimate detail after short delay so user sees success message
+      setTimeout(() => router.push(`/estimate/${id}`), 1500);
     } catch (e: any) {
       setError(e.message || 'Approval failed');
     } finally {
@@ -123,7 +125,7 @@ export default function ApprovePage() {
         </Link>
         <div className="flex-1">
           <h1 className="text-lg font-bold text-[#002147] flex items-center gap-2">
-            <ShieldAlert size={20} className="text-[#d4a017]" />
+            <ShieldAlert size={20} className="text-[#94a3b8]" />
             Approval Gateway
           </h1>
           <p className="text-xs text-[#64748b] mt-0.5">
@@ -221,12 +223,23 @@ export default function ApprovePage() {
         </h2>
 
         {isApproved ? (
-          <div className="flex items-center gap-3 text-[#059669] py-2">
-            <CheckCircle size={20} />
-            <div>
-              <p className="font-semibold">Estimate Approved</p>
-              <p className="text-sm text-[#64748b]">Report generation has been initiated.</p>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 text-[#059669] py-2">
+              <CheckCircle size={20} />
+              <div>
+                <p className="font-semibold">Estimate Approved</p>
+                <p className="text-sm text-[#64748b]">Report generation has been initiated.</p>
+              </div>
             </div>
+            <a
+              href={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/ingestion/download/${id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#002147] hover:bg-[#001a3a] text-white rounded-md font-semibold text-sm transition-colors"
+            >
+              <Zap size={16} />
+              Download Final PDF Proposal
+            </a>
           </div>
         ) : canApprove ? (
           <div>
@@ -237,7 +250,7 @@ export default function ApprovePage() {
             <button
               onClick={handleApprove}
               disabled={approving}
-              className="flex items-center gap-2 px-5 py-2.5 bg-[#d4a017] hover:bg-[#b8900f] text-[#002147] rounded-md font-semibold text-sm transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#002147] hover:bg-[#1e3a5f] text-white rounded-md font-semibold text-sm transition-colors disabled:opacity-50"
             >
               {approving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
               {approving ? 'Processing...' : 'Approve and Generate Reports'}

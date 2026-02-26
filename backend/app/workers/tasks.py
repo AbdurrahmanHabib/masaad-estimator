@@ -189,7 +189,34 @@ def generate_report(self, estimate_id: str, report_type: str, tenant_id: str):
     self.update_state(state="PROGRESS", meta={"step": f"Generating {report_type}", "pct": 10})
     try:
         from app.services.report_engine import ReportEngine
-        result = _run_async(ReportEngine().generate(estimate_id, report_type, tenant_id))
+
+        # Load tenant settings for white-label branding
+        async def _gen():
+            tenant_settings = {}
+            try:
+                from app.db import AsyncSessionLocal
+                from app.models.orm_models import Tenant
+                from sqlalchemy import select as sa_select
+                async with AsyncSessionLocal() as session:
+                    t_res = await session.execute(
+                        sa_select(Tenant).where(Tenant.id == tenant_id)
+                    )
+                    tenant = t_res.scalar_one_or_none()
+                    if tenant:
+                        tenant_settings = {
+                            "company_name": tenant.company_name,
+                            "theme_color_hex": tenant.theme_color_hex,
+                            "base_currency": tenant.base_currency,
+                            "report_header_text": tenant.report_header_text,
+                            "report_footer_text": tenant.report_footer_text,
+                        }
+            except Exception:
+                pass
+            return await ReportEngine(tenant_settings=tenant_settings).generate(
+                estimate_id, report_type, tenant_id
+            )
+
+        result = _run_async(_gen())
         self.update_state(state="PROGRESS", meta={"step": "Complete", "pct": 100})
         return result
     except Exception as e:

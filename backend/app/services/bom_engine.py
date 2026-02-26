@@ -92,6 +92,18 @@ UAE_RATES = {
     "patch_fitting_set_aed": 320.0,
     "auto_door_operator_aed": 4500.0,
 
+    # Hardware System Sets — bundled per-opening pricing
+    # Each set includes all hardware components for that system type.
+    "hw_set_casement_window_aed": 123.0,     # handle(25) + friction hinges(35) + multi-point lock(45) + restrictor(18)
+    "hw_set_sliding_door_aed": 210.0,        # handle pair(50) + roller set(85) + flush lock(45) + anti-lift block(30)
+    "hw_set_hinged_door_aed": 435.0,         # handle set(85) + mortice lock(120) + hinge set 3pc(55) + closer(175)
+    "hw_set_tilt_turn_aed": 165.0,           # tilt-turn gear(95) + handle(25) + restrictor(18) + hinge set(27)
+    "hw_set_top_hung_aed": 108.0,            # friction stays pair(35) + handle(25) + stay lock(30) + restrictor(18)
+    "hw_set_folding_door_aed": 320.0,        # track set(120) + roller carriages(85) + flush bolts pair(40) + handles(50) + restrictor(25)
+    "hw_set_entrance_door_aed": 1085.0,      # floor spring(650) + patch fittings(320) + handle set(85) + lock(30)
+    "hw_set_auto_entrance_aed": 5235.0,      # auto operator(4500) + floor spring(650) + handle set(85)
+    "hw_set_shopfront_aed": 435.0,           # same as hinged door (handle + mortice + hinges + closer)
+
     # Fixings
     "chemical_anchor_m12_aed": 8.50,
     "expansion_bolt_m10_aed": 3.50,
@@ -513,9 +525,11 @@ class BOMEngine:
         tb_lm = _r(sqm_total * ratio.get("thermal_break_lm_per_sqm", 0), 2)
         if tb_lm > 0:
             tb_rate = R["thermal_break_aed_lm"]
+            sys_depth = self._get_system_depth_mm(system_type)
+            tb_desc = f"Polyamide Thermal Break Strip - {sys_depth}mm {system_type} System" if sys_depth else f"Polyamide Thermal Break Strip - {system_type}"
             items.append(BOMLineItem(
                 item_code="ALU-THERMAL-BREAK",
-                description="Polyamide thermal break strip",
+                description=tb_desc,
                 category="ALUMINUM",
                 unit="lm",
                 quantity=tb_lm,
@@ -813,100 +827,52 @@ class BOMEngine:
                 ))
 
         # ══════════════════════════════════════════════════════════════════════
-        # 8. HARDWARE (handles, locks, hinges, restrictors)
+        # 8. HARDWARE SYSTEM SETS (bundled per-opening pricing)
         # ══════════════════════════════════════════════════════════════════════
-        handle_count = ratio.get("handle_per_opening", 0) * qty
-        if handle_count > 0:
-            is_door = any(kw in system_type.lower() for kw in ["door", "entrance", "shopfront"])
-            if is_door:
+        # Map system_type keywords → set rate key + human-readable description
+        _st = system_type.lower()
+        hw_set_key = None
+        hw_set_desc = None
+        if "auto" in _st and ("entrance" in _st or "door" in _st):
+            hw_set_key = "hw_set_auto_entrance_aed"
+            hw_set_desc = "Auto Entrance Door Hardware Set (operator + floor spring + handle)"
+        elif "entrance" in _st or ("door" in _st and "sliding" not in _st and "folding" not in _st):
+            hw_set_key = "hw_set_entrance_door_aed" if "patch" in _st or "frameless" in _st else "hw_set_hinged_door_aed"
+            hw_set_desc = "Entrance Door Hardware Set (floor spring + patch fittings + handle + lock)" if "patch" in _st or "frameless" in _st else "Hinged Door Hardware Set (handle + mortice lock + hinges + closer)"
+        elif "shopfront" in _st:
+            hw_set_key = "hw_set_shopfront_aed"
+            hw_set_desc = "Shopfront Door Hardware Set (handle + mortice lock + hinges + closer)"
+        elif "sliding" in _st:
+            hw_set_key = "hw_set_sliding_door_aed"
+            hw_set_desc = "Sliding Door Hardware Set (handles + rollers + flush lock + anti-lift)"
+        elif "folding" in _st or "bifold" in _st:
+            hw_set_key = "hw_set_folding_door_aed"
+            hw_set_desc = "Folding Door Hardware Set (track + carriages + flush bolts + handles)"
+        elif "tilt" in _st and "turn" in _st:
+            hw_set_key = "hw_set_tilt_turn_aed"
+            hw_set_desc = "Tilt & Turn Window Hardware Set (gear + handle + restrictor + hinges)"
+        elif "top" in _st and "hung" in _st:
+            hw_set_key = "hw_set_top_hung_aed"
+            hw_set_desc = "Top Hung Window Hardware Set (friction stays + handle + lock + restrictor)"
+        elif "casement" in _st or "awning" in _st:
+            hw_set_key = "hw_set_casement_window_aed"
+            hw_set_desc = "Casement Window Hardware Set (handle + friction hinges + lock + restrictor)"
+        # curtain_wall, fixed glazing, strip window → no operable hardware set
+
+        if hw_set_key and ratio.get("handle_per_opening", 0) > 0:
+            set_cost = R.get(hw_set_key, 0)
+            if set_cost > 0:
                 items.append(BOMLineItem(
-                    item_code="HW-DOOR-HANDLE",
-                    description="Door handle set (lever, SS finish)",
+                    item_code=f"HW-SET-{system_type.upper().replace(' ', '-')[:20]}",
+                    description=hw_set_desc,
                     category="HARDWARE",
                     unit="set",
-                    quantity=float(handle_count),
-                    unit_cost_aed=R["door_handle_set_aed"],
-                    subtotal_aed=_r(handle_count * R["door_handle_set_aed"]),
+                    quantity=float(qty),
+                    unit_cost_aed=set_cost,
+                    subtotal_aed=_r(qty * set_cost),
                     source_opening_id=opening_id,
+                    notes=f"System set: {hw_set_key}",
                 ))
-            else:
-                items.append(BOMLineItem(
-                    item_code="HW-CASEMENT-HANDLE",
-                    description="Casement window handle (espagnolette)",
-                    category="HARDWARE",
-                    unit="nr",
-                    quantity=float(handle_count),
-                    unit_cost_aed=R["handle_casement_aed"],
-                    subtotal_aed=_r(handle_count * R["handle_casement_aed"]),
-                    source_opening_id=opening_id,
-                ))
-
-        lock_count = ratio.get("lock_per_opening", 0) * qty
-        if lock_count > 0:
-            is_door = any(kw in system_type.lower() for kw in ["door", "entrance", "shopfront"])
-            if is_door:
-                items.append(BOMLineItem(
-                    item_code="HW-MORTICE-LOCK",
-                    description="Mortice lock (5-lever, SS)",
-                    category="HARDWARE",
-                    unit="nr",
-                    quantity=float(lock_count),
-                    unit_cost_aed=R["mortice_lock_aed"],
-                    subtotal_aed=_r(lock_count * R["mortice_lock_aed"]),
-                    source_opening_id=opening_id,
-                ))
-            else:
-                items.append(BOMLineItem(
-                    item_code="HW-CASEMENT-LOCK",
-                    description="Casement window multi-point lock",
-                    category="HARDWARE",
-                    unit="nr",
-                    quantity=float(lock_count),
-                    unit_cost_aed=R["lock_casement_aed"],
-                    subtotal_aed=_r(lock_count * R["lock_casement_aed"]),
-                    source_opening_id=opening_id,
-                ))
-
-        hinge_count = ratio.get("hinge_per_opening", 0) * qty
-        if hinge_count > 0:
-            items.append(BOMLineItem(
-                item_code="HW-HINGE-PAIR",
-                description="Friction hinge pair (stainless steel)",
-                category="HARDWARE",
-                unit="pair",
-                quantity=float(hinge_count),
-                unit_cost_aed=R["hinge_pair_casement_aed"],
-                subtotal_aed=_r(hinge_count * R["hinge_pair_casement_aed"]),
-                source_opening_id=opening_id,
-            ))
-
-        # Window restrictor for casement windows
-        if "casement" in system_type.lower():
-            restrictor_count = qty
-            items.append(BOMLineItem(
-                item_code="HW-RESTRICTOR",
-                description="Window opening restrictor (safety)",
-                category="HARDWARE",
-                unit="nr",
-                quantity=float(restrictor_count),
-                unit_cost_aed=R["restrictor_aed"],
-                subtotal_aed=_r(restrictor_count * R["restrictor_aed"]),
-                source_opening_id=opening_id,
-            ))
-
-        # Door closer for doors
-        if any(kw in system_type.lower() for kw in ["door", "entrance"]) and "sliding" not in system_type.lower():
-            closer_count = qty
-            items.append(BOMLineItem(
-                item_code="HW-DOOR-CLOSER",
-                description="Overhead door closer (EN 1154 size 3-5)",
-                category="HARDWARE",
-                unit="nr",
-                quantity=float(closer_count),
-                unit_cost_aed=R["door_closer_aed"],
-                subtotal_aed=_r(closer_count * R["door_closer_aed"]),
-                source_opening_id=opening_id,
-            ))
 
         # EPDM setting blocks
         setting_blocks = round(sqm_total * ratio["setting_block_per_sqm"])
@@ -1108,10 +1074,12 @@ class BOMEngine:
         # ══════════════════════════════════════════════════════════════════════
         # 13. ATTIC STOCK (+2% on material quantities) — Blind Spot Rule
         # ══════════════════════════════════════════════════════════════════════
-        material_categories = {"ALUMINUM", "GLASS", "ACP", "HARDWARE", "SEALANT", "FIXING", "SURFACE"}
+        # ALUMINUM excluded — 1D-CSP solver in cutting_list_engine now handles real
+        # bar packing & wastage; adding attic stock would double-count scrap.
+        attic_categories = {"GLASS", "ACP", "HARDWARE", "SEALANT", "FIXING", "SURFACE"}
         attic_items = []
         for item in items:
-            if item.category in material_categories:
+            if item.category in attic_categories:
                 attic_qty = _r(item.quantity * ATTIC_STOCK_PCT, 4)
                 if attic_qty > 0:
                     attic_items.append(BOMLineItem(
@@ -1416,19 +1384,26 @@ class BOMEngine:
         self, items: List[BOMLineItem], total_kg: float,
         ratio: Dict, alu_rate: float, opening_id: str, system_type: str,
     ):
-        """Add broken-down aluminum extrusion lines (mullion, transom, pressure plate, capping)."""
+        """Add broken-down aluminum extrusion lines with explicit system depth and thermal status."""
         mullion_pct = ratio.get("mullion_pct", 0.30)
         transom_pct = ratio.get("transom_pct", 0.25)
         pp_pct = ratio.get("pressure_plate_pct", 0.15)
         cap_pct = ratio.get("capping_pct", 0.10)
         other_pct = 1.0 - mullion_pct - transom_pct - pp_pct - cap_pct
 
+        # Derive system depth and thermal status from system type
+        sys_depth = self._get_system_depth_mm(system_type)
+        has_thermal = ratio.get("thermal_break_lm_per_sqm", 0) > 0
+        thermal_tag = "Polyamide Thermal Break" if has_thermal else "Non-Thermal"
+        depth_tag = f"{sys_depth}mm Depth" if sys_depth else ""
+        sys_suffix = f" - {depth_tag} - {thermal_tag} System" if depth_tag else f" - {thermal_tag} System"
+
         breakdown = [
-            ("ALU-MULLION", f"Aluminum mullion profile -- {system_type}", mullion_pct, UAE_RATES["aluminum_mullion_aed_kg"]),
-            ("ALU-TRANSOM", f"Aluminum transom profile -- {system_type}", transom_pct, UAE_RATES["aluminum_transom_aed_kg"]),
-            ("ALU-PRESS-PLATE", f"Pressure plate -- {system_type}", pp_pct, UAE_RATES["aluminum_pressure_plate_aed_kg"]),
-            ("ALU-CAPPING", f"Snap-on capping -- {system_type}", cap_pct, UAE_RATES["aluminum_capping_aed_kg"]),
-            ("ALU-MISC", f"Misc aluminum profiles (sill, head, adapter) -- {system_type}", other_pct, alu_rate),
+            ("ALU-MULLION", f"Aluminum Mullion{sys_suffix}", mullion_pct, UAE_RATES["aluminum_mullion_aed_kg"]),
+            ("ALU-TRANSOM", f"Aluminum Transom{sys_suffix}", transom_pct, UAE_RATES["aluminum_transom_aed_kg"]),
+            ("ALU-PRESS-PLATE", f"Aluminum Pressure Plate{sys_suffix}", pp_pct, UAE_RATES["aluminum_pressure_plate_aed_kg"]),
+            ("ALU-CAPPING", f"Aluminum Snap-On Capping{sys_suffix}", cap_pct, UAE_RATES["aluminum_capping_aed_kg"]),
+            ("ALU-MISC", f"Aluminum Misc Profiles (Sill, Head, Adapter){sys_suffix}", other_pct, alu_rate),
         ]
 
         for code, desc, pct, rate in breakdown:
@@ -1448,6 +1423,33 @@ class BOMEngine:
                 source_opening_id=opening_id,
                 notes="No catalog loaded -- using UAE market rates",
             ))
+
+    # Standard mullion depths per system type (mm) — UAE industry norms
+    SYSTEM_DEPTHS = {
+        "Curtain Wall": 150,
+        "Curtain Wall (Stick)": 150,
+        "Curtain Wall (Unitised)": 170,
+        "Structural Glazing": 180,
+        "Sliding Door": 100,
+        "Casement Window": 70,
+        "Fixed Window": 60,
+        "Window - Casement": 70,
+        "Window - Fixed": 60,
+        "Window - Sliding": 100,
+        "Door - Single Swing": 80,
+        "Door - Double Swing": 80,
+        "ACP Cladding": 50,
+        "Shopfront": 100,
+        "Glass Balustrade": 0,
+        "Spider Glazing": 0,
+    }
+
+    def _get_system_depth_mm(self, system_type: str) -> int:
+        """Return nominal mullion/system depth in mm for the system type."""
+        for key, depth in self.SYSTEM_DEPTHS.items():
+            if key.lower() in system_type.lower() or system_type.lower() in key.lower():
+                return depth
+        return 100  # sensible default
 
     def _get_ratio(self, system_type: str) -> Dict:
         for key in SYSTEM_RATIOS:

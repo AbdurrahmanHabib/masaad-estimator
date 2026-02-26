@@ -17,7 +17,7 @@ from typing import List, Dict, Any, Optional
 logger = logging.getLogger("masaad-drafting")
 
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/downloads")
-COMPANY_NAME = "MADINAT AL SAADA ALUMINIUM & GLASS WORKS LLC"
+DEFAULT_COMPANY_NAME = "MADINAT AL SAADA ALUMINIUM & GLASS WORKS LLC"
 
 # Colors
 NAVY = (0, 0.13, 0.28)      # #002147
@@ -47,11 +47,94 @@ SYSTEM_COLORS = {
 class VisualDraftingEngine:
     """Generates marked-up PDF drawings from opening schedule data."""
 
+    def __init__(self, tenant_settings: Dict[str, Any] = None):
+        """Initialize with optional tenant branding."""
+        ts = tenant_settings or {}
+        self.company_name = ts.get("company_name", DEFAULT_COMPANY_NAME)
+        self.theme_color_hex = ts.get("theme_color_hex", "#002147")
+        self.logo_url = ts.get("logo_url")
+        # Parse theme color to RGB tuple
+        try:
+            hex_color = self.theme_color_hex.lstrip("#")
+            self.theme_rgb = (
+                int(hex_color[0:2], 16) / 255,
+                int(hex_color[2:4], 16) / 255,
+                int(hex_color[4:6], 16) / 255,
+            )
+        except Exception:
+            self.theme_rgb = NAVY
+
+    def _generate_placeholder_pdf(self, path: str, title: str, project_name: str) -> str:
+        """Generate a valid PDF stating 'Awaiting CAD Data for Generation'."""
+        try:
+            from reportlab.pdfgen import canvas as rl_canvas
+            from reportlab.lib.pagesizes import A3, landscape
+            from reportlab.lib.units import cm
+
+            page_w, page_h = landscape(A3)
+            c = rl_canvas.Canvas(path, pagesize=landscape(A3))
+            try:
+                self._draw_title_block(c, page_w, page_h, title, project_name)
+
+                center_x = page_w / 2
+                center_y = page_h / 2 + 1 * cm
+
+                # Warning icon (triangle)
+                c.setStrokeColorRGB(*GOLD)
+                c.setFillColorRGB(1.0, 0.95, 0.8)
+                c.setLineWidth(2)
+                tri_size = 2 * cm
+                c.beginPath()
+                c.moveTo(center_x, center_y + tri_size)
+                c.lineTo(center_x - tri_size, center_y - tri_size * 0.5)
+                c.lineTo(center_x + tri_size, center_y - tri_size * 0.5)
+                c.closePath()
+                c.drawPath(fill=1, stroke=1)
+
+                c.setFillColorRGB(*GOLD)
+                c.setFont("Helvetica-Bold", 18)
+                c.drawCentredString(center_x, center_y - 0.1 * cm, "!")
+
+                # Main message
+                c.setFillColorRGB(*DARK_GRAY)
+                c.setFont("Helvetica-Bold", 16)
+                c.drawCentredString(center_x, center_y - 2 * cm,
+                                    "AWAITING CAD DATA FOR GENERATION")
+
+                c.setFont("Helvetica", 11)
+                c.setFillColorRGB(0.4, 0.4, 0.4)
+                c.drawCentredString(center_x, center_y - 3 * cm,
+                                    "Please upload .DWG elevation/plan files to generate this drawing.")
+                c.drawCentredString(center_x, center_y - 3.6 * cm,
+                                    "This placeholder will be replaced automatically when geometry is available.")
+            finally:
+                c.save()
+            logger.info(f"Placeholder PDF generated: {path}")
+            return path
+        except Exception as e:
+            logger.error(f"Placeholder PDF generation failed: {e}")
+            return None
+
     def generate_all(self, estimate_id: str, openings: List[Dict],
                      scope: Dict = None, project_name: str = "") -> Dict[str, Any]:
         """Generate all visual deliverables. Returns dict with output_paths."""
         os.makedirs(DOWNLOAD_DIR, exist_ok=True)
         paths = []
+
+        # If no openings at all, generate placeholder PDFs instead of empty/corrupted files
+        if not openings:
+            placeholder_path = os.path.join(DOWNLOAD_DIR, f"Elevations_{estimate_id[:8]}.pdf")
+            p = self._generate_placeholder_pdf(
+                placeholder_path, "Facade Elevation — Awaiting Data", project_name
+            )
+            if p:
+                paths.append({"type": "elevation", "path": p, "name": "Elevation Markup (Awaiting Data)"})
+            return {
+                "estimate_id": estimate_id,
+                "drawings": paths,
+                "generated_at": datetime.utcnow().isoformat(),
+                "drawing_count": len(paths),
+            }
 
         # 1. Elevation markup
         elev_path = self._generate_elevation_pdf(estimate_id, openings, project_name)
@@ -97,7 +180,7 @@ class VisualDraftingEngine:
         # Company name
         c.setFillColorRGB(*WHITE)
         c.setFont("Helvetica-Bold", 10)
-        c.drawString(1 * cm, tb_height - 0.8 * cm, COMPANY_NAME)
+        c.drawString(1 * cm, tb_height - 0.8 * cm, self.company_name)
 
         # Drawing title
         c.setFont("Helvetica-Bold", 9)
@@ -120,6 +203,8 @@ class VisualDraftingEngine:
     def _generate_elevation_pdf(self, estimate_id: str, openings: List[Dict],
                                  project_name: str) -> Optional[str]:
         """Generate elevation markup PDF showing all openings tagged with Mark IDs."""
+        c = None
+        path = None
         try:
             from reportlab.pdfgen import canvas as rl_canvas
             from reportlab.lib.pagesizes import A3, landscape
@@ -266,16 +351,27 @@ class VisualDraftingEngine:
                     c.drawString(legend_x + 10, legend_y, sys_name)
                     legend_x += len(sys_name) * 3.5 + 20
 
-            c.save()
             logger.info(f"Elevation PDF generated: {path}")
             return path
         except Exception as e:
             logger.error(f"Elevation PDF failed: {e}")
+            if path:
+                return self._generate_placeholder_pdf(
+                    path, "Facade Elevation — Generation Error", project_name
+                )
             return None
+        finally:
+            if c is not None:
+                try:
+                    c.save()
+                except Exception:
+                    pass
 
     def _generate_shop_drawings_pdf(self, estimate_id: str, openings: List[Dict],
                                       project_name: str) -> Optional[str]:
         """Generate shop drawing cross-sections for each system type."""
+        c = None
+        path = None
         try:
             from reportlab.pdfgen import canvas as rl_canvas
             from reportlab.lib.pagesizes import A3, landscape
@@ -482,16 +578,27 @@ class VisualDraftingEngine:
                     for j, v in enumerate(vals):
                         c.drawString(sched_x + j * 55, row_y, v)
 
-            c.save()
             logger.info(f"Shop drawings PDF generated: {path}")
             return path
         except Exception as e:
             logger.error(f"Shop drawings PDF failed: {e}")
+            if path:
+                return self._generate_placeholder_pdf(
+                    path, "Shop Drawings — Generation Error", project_name
+                )
             return None
+        finally:
+            if c is not None:
+                try:
+                    c.save()
+                except Exception:
+                    pass
 
     def _generate_acp_layout_pdf(self, estimate_id: str, acp_openings: List[Dict],
                                    project_name: str) -> Optional[str]:
         """Generate ACP panel flat-sheet layouts with routing/folding dimensions."""
+        c = None
+        path = None
         try:
             from reportlab.pdfgen import canvas as rl_canvas
             from reportlab.lib.pagesizes import A3, landscape
@@ -592,9 +699,18 @@ class VisualDraftingEngine:
             c.drawString(sample_x + 2, sample_y + panel_h - fold + 3, "ROUTE LINE (V-groove 3mm)")
             c.drawString(sample_x + fold + 5, sample_y + fold + 5, "FINISHED FACE")
 
-            c.save()
             logger.info(f"ACP layout PDF generated: {path}")
             return path
         except Exception as e:
             logger.error(f"ACP layout PDF failed: {e}")
+            if path:
+                return self._generate_placeholder_pdf(
+                    path, "ACP Panel Layouts — Generation Error", project_name
+                )
             return None
+        finally:
+            if c is not None:
+                try:
+                    c.save()
+                except Exception:
+                    pass

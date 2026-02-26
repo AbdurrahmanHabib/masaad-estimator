@@ -296,6 +296,34 @@ async def _ingestion_impl(state: GraphState) -> GraphState:
 
     logger.info(f"[{estimate_id}] IngestionNode: {len(openings)} openings extracted")
 
+    # ── NO-VECTOR FAILSAFE ────────────────────────────────────────────────
+    # If PDFs contain only raster images (renders/photos) and no DWG was
+    # provided, the AI will hallucinate placeholder quantities. Halt early.
+    from app.services.scope_engine import ScopeIdentificationEngine
+    has_dwg = bool(drawing_paths and any(
+        p.lower().endswith((".dwg", ".dxf")) for p in drawing_paths if p
+    ))
+    spec_pdfs = [p for p in drawing_paths if p and p.lower().endswith(".pdf")] if drawing_paths else []
+    vector_check = ScopeIdentificationEngine.check_vector_data_available(
+        dwg_extraction=result.get("dwg_extraction", {}),
+        has_dwg_files=has_dwg,
+        spec_pdf_paths=spec_pdfs,
+    )
+    if vector_check.get("should_halt"):
+        logger.warning(
+            f"[{estimate_id}] NO-VECTOR FAILSAFE: {vector_check['reason']}"
+        )
+        state["status"] = "NEEDS_INFO"
+        state["error"] = vector_check["reason"]
+        state["error_node"] = "IngestionNode"
+        state["hitl_pending"] = True
+        await _persist_estimate(estimate_id, {
+            "status": "NEEDS_INFO",
+            "current_step": "Halted — no vector data detected",
+            "progress_pct": 2,
+        })
+        return state
+
     # Sub-graph reported a soft error (e.g., unrecognised DWG layer naming).
     # Reduce confidence but do NOT raise — the estimate can continue with fewer
     # openings and the HITL conditional will fire if confidence drops below 0.90.
@@ -1099,7 +1127,29 @@ async def _report_impl(state: GraphState) -> GraphState:
     estimate_id = state["estimate_id"]
 
     try:
-        engine = ReportEngine()
+        # Load tenant settings for white-label branding
+        tenant_settings = {}
+        try:
+            from app.db import AsyncSessionLocal
+            from app.models.orm_models import Tenant
+            from sqlalchemy import select as sa_select
+            async with AsyncSessionLocal() as session:
+                t_res = await session.execute(
+                    sa_select(Tenant).where(Tenant.id == state["tenant_id"])
+                )
+                tenant = t_res.scalar_one_or_none()
+                if tenant:
+                    tenant_settings = {
+                        "company_name": tenant.company_name,
+                        "theme_color_hex": tenant.theme_color_hex,
+                        "base_currency": tenant.base_currency,
+                        "report_header_text": tenant.report_header_text,
+                        "report_footer_text": tenant.report_footer_text,
+                    }
+        except Exception:
+            pass
+
+        engine = ReportEngine(tenant_settings=tenant_settings)
         result = await engine.generate(
             estimate_id=estimate_id,
             report_type="full_package",

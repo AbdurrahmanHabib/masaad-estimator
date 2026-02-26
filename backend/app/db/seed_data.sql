@@ -36,7 +36,20 @@ INSERT INTO material_rates (tenant_id)
 SELECT id FROM tenants WHERE slug = 'masaad'
 ON CONFLICT (tenant_id) DO NOTHING;
 
--- 5. Default consultant dictionary entries (common UAE layer naming conventions)
+-- 5. Default admin user (admin@masaad.ae / admin1234)
+INSERT INTO users (email, hashed_password, full_name, is_active, tenant_id, role_id)
+SELECT
+    'admin@masaad.ae',
+    '$2b$12$mJcF8vQBFaFZdmwwRUE/D.PXKYyoUMcz7ZAhYVJ4VRY3nqSwfoKDy',
+    'Admin',
+    TRUE,
+    t.id,
+    r.id
+FROM tenants t, roles r
+WHERE t.slug = 'masaad' AND r.name = 'Admin'
+ON CONFLICT (email) DO NOTHING;
+
+-- 6. Default consultant dictionary entries (common UAE layer naming conventions)
 INSERT INTO consultant_dictionary (tenant_id, consultant_name, raw_layer_name, mapped_internal_type)
 SELECT t.id, 'Generic', layer, mapped FROM tenants t, (VALUES
     ('A-CW-EXT', 'Curtain Wall (Stick)'),

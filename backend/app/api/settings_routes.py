@@ -41,11 +41,29 @@ async def get_settings_root():
     except Exception as e:
         logger.debug(f"Settings root: DB not available ({e}), using defaults")
 
+    # Attempt to load tenant branding from DB
+    company_name = "Madinat Al Saada Aluminium & Glass Works LLC"
+    currency = "AED"
+    theme_color = "#002147"
+    try:
+        from app.db import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            t_result = await session.execute(select(Tenant).limit(1))
+            tenant = t_result.scalar_one_or_none()
+            if tenant:
+                company_name = tenant.company_name or company_name
+                currency = tenant.base_currency or currency
+                theme_color = tenant.theme_color_hex or theme_color
+                factory_rate = float(tenant.default_factory_burn_rate) if tenant.default_factory_burn_rate else factory_rate
+    except Exception:
+        pass
+
     return {
         "factory_rate_aed": factory_rate,
         "shop_rate_aed": shop_rate,
-        "company_name": "Madinat Al Saada Aluminium & Glass Works LLC",
-        "currency": "AED",
+        "company_name": company_name,
+        "currency": currency,
+        "theme_color_hex": theme_color,
         "default_margin_pct": 18.0,
         "retention_pct": 10.0,
         "attic_stock_pct": 2.0,
@@ -53,6 +71,25 @@ async def get_settings_root():
 
 
 # ─── Pydantic schemas ────────────────────────────────────────────────────────
+
+class TenantSettingsUpdate(BaseModel):
+    """MODULE 1: Multi-Tenant Financial Engine — tenant-level settings."""
+    company_name: Optional[str] = None
+    theme_color_hex: Optional[str] = None
+    base_currency: Optional[str] = None
+    monthly_factory_overhead: Optional[float] = None
+    default_factory_burn_rate: Optional[float] = None
+    logo_url: Optional[str] = None
+    report_header_text: Optional[str] = None
+    report_footer_text: Optional[str] = None
+    # Company contact details (used in letters, proposals, reports)
+    company_address: Optional[str] = None
+    company_phone: Optional[str] = None
+    company_email: Optional[str] = None
+    company_po_box: Optional[str] = None
+    company_cr_number: Optional[str] = None
+    company_trn: Optional[str] = None
+
 
 class FinancialRatesUpdate(BaseModel):
     lme_aluminum_usd_mt: Optional[float] = None
@@ -251,6 +288,61 @@ async def upsert_material_rates(
     if updates:
         mat.rates_last_updated = datetime.utcnow()
         mat.updated_by = user.id
+
+    await db.commit()
+    return {"status": "updated", "fields_updated": list(updates.keys())}
+
+
+@router.get("/tenant")
+async def get_tenant_settings(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """MODULE 1: Return tenant-level settings (financial engine + branding)."""
+    if not user.tenant_id:
+        raise HTTPException(status_code=400, detail="User has no tenant assigned")
+    result = await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    return {
+        "id": str(tenant.id),
+        "name": tenant.name,
+        "company_name": tenant.company_name,
+        "slug": tenant.slug,
+        "logo_url": tenant.logo_url,
+        "theme_color_hex": tenant.theme_color_hex,
+        "base_currency": tenant.base_currency,
+        "monthly_factory_overhead": float(tenant.monthly_factory_overhead),
+        "default_factory_burn_rate": float(tenant.default_factory_burn_rate),
+        "report_header_text": tenant.report_header_text,
+        "report_footer_text": tenant.report_footer_text,
+        "subscription_tier": tenant.subscription_tier,
+        "company_address": tenant.company_address,
+        "company_phone": tenant.company_phone,
+        "company_email": tenant.company_email,
+        "company_po_box": tenant.company_po_box,
+        "company_cr_number": tenant.company_cr_number,
+        "company_trn": tenant.company_trn,
+    }
+
+
+@router.put("/tenant")
+async def update_tenant_settings(
+    payload: TenantSettingsUpdate,
+    user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """MODULE 1: Update tenant-level settings (Admin only)."""
+    tenant_id = await _get_tenant_id(user)
+    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    updates = payload.model_dump(exclude_none=True)
+    for field, value in updates.items():
+        setattr(tenant, field, value)
 
     await db.commit()
     return {"status": "updated", "fields_updated": list(updates.keys())}

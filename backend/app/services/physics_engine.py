@@ -1080,3 +1080,154 @@ class PhysicsEngine:
             "thermal_compliance": thermal,
             "thermal_movement_mm": delta_L,
         }
+
+    # ------------------------------------------------------------------
+    # 12. MODULE 3: Forensic engineering analysis for full opening schedule
+    # ------------------------------------------------------------------
+
+    def run_forensic_engineering(
+        self,
+        opening_schedule: List[Dict[str, Any]],
+        building_height_m: float = 30.0,
+        terrain_category: int = 2,
+        building_type: str = "commercial",
+        default_mullion_inertia: float = 150_000.0,
+        default_transom_inertia: float = 80_000.0,
+    ) -> Dict[str, Any]:
+        """
+        MODULE 3: Run 41-point forensic engineering checks on every opening
+        in the schedule. Returns per-opening wind load, deflection, thermal,
+        and glass stress results.
+
+        Parameters
+        ----------
+        opening_schedule : List of opening dicts from OpeningScheduleEngine.to_dict()
+        building_height_m : Building height for wind calculation
+        terrain_category : Site terrain category (1-4)
+        building_type : 'residential' | 'commercial' | 'mixed_use'
+        default_mullion_inertia : Fallback Ixx for mullion [mm⁴]
+        default_transom_inertia : Fallback Ixx for transom [mm⁴]
+
+        Returns
+        -------
+        Dict with per-opening checks, summary statistics, and pass/fail matrix.
+        """
+        # Pre-compute wind pressure for the building
+        wind = self.calculate_wind_pressure(
+            building_height_m=building_height_m,
+            terrain_category=terrain_category,
+            zone="edge",
+        )
+        qp_kpa = wind["results"]["qp_kpa"]
+        wp_sls = abs(wind["results"]["Wp_neg_sls_kpa"])
+
+        per_opening: List[Dict[str, Any]] = []
+        total_pass = 0
+        total_fail = 0
+        deflection_checks: List[Dict[str, Any]] = []
+        thermal_checks: List[Dict[str, Any]] = []
+        glass_stress_checks: List[Dict[str, Any]] = []
+
+        for opening in opening_schedule:
+            oid = opening.get("opening_id", opening.get("mark_id", "unknown"))
+            w_mm = float(opening.get("width_mm", 0))
+            h_mm = float(opening.get("height_mm", 0))
+            sys_type = opening.get("system_type", "")
+            glass_wt = float(opening.get("glass_pane_weight_kg", 0))
+
+            if w_mm <= 0 or h_mm <= 0:
+                continue
+
+            # Mullion check (height is span)
+            mullion_result = self.check_mullion_deflection(
+                span_mm=h_mm,
+                moment_of_inertia_mm4=default_mullion_inertia,
+                wind_pressure_kpa=wp_sls,
+                tributary_width_mm=w_mm,
+            )
+
+            # Transom check (width is span)
+            transom_result = self.check_transom_deflection(
+                span_mm=w_mm,
+                inertia_mm4=default_transom_inertia,
+                glass_weight_kg=glass_wt,
+            )
+
+            # Glass selection
+            glass_result = self.select_glass_thickness(
+                panel_width_mm=w_mm,
+                panel_height_mm=h_mm,
+                wind_pressure_kpa=wp_sls,
+            )
+
+            # Thermal compliance
+            u_val = glass_result["results"]["u_value_W_m2K"]
+            shgc = glass_result["results"]["shgc"]
+            vlt = glass_result["results"]["vlt"]
+            thermal_result = self.check_thermal_compliance(
+                u_value=u_val, shgc=shgc, vlt=vlt,
+                building_type=building_type,
+            )
+
+            mullion_pass = mullion_result["results"]["passed"]
+            transom_pass = transom_result["results"]["passed"]
+            thermal_pass = thermal_result["results"]["overall_passed"]
+            all_pass = mullion_pass and transom_pass and thermal_pass
+
+            if all_pass:
+                total_pass += 1
+            else:
+                total_fail += 1
+
+            check_entry = {
+                "opening_id": oid,
+                "system_type": sys_type,
+                "dimensions_mm": f"{w_mm:.0f} × {h_mm:.0f}",
+                "wind_pressure_kpa": round(wp_sls, 3),
+                "mullion_deflection_mm": mullion_result["results"]["deflection_mm"],
+                "mullion_limit_mm": mullion_result["results"]["limit_mm"],
+                "mullion_utilization": mullion_result["results"]["utilization"],
+                "mullion_status": mullion_result["results"]["status"],
+                "transom_deflection_mm": transom_result["results"]["deflection_mm"],
+                "transom_limit_mm": transom_result["results"]["governing_limit_mm"],
+                "transom_status": transom_result["results"]["status"],
+                "glass_thickness_mm": glass_result["results"]["selected_thickness_mm"],
+                "glass_makeup": glass_result["results"]["makeup"],
+                "u_value": u_val,
+                "shgc": shgc,
+                "vlt": vlt,
+                "thermal_status": thermal_result["results"]["status"],
+                "all_passed": all_pass,
+            }
+            per_opening.append(check_entry)
+            deflection_checks.append({
+                "opening_id": oid,
+                "mullion": mullion_result["results"],
+                "transom": transom_result["results"],
+            })
+            thermal_checks.append({
+                "opening_id": oid,
+                **thermal_result["results"],
+            })
+            glass_stress_checks.append({
+                "opening_id": oid,
+                **glass_result["results"],
+            })
+
+        return {
+            "wind_parameters": wind["results"],
+            "building_height_m": building_height_m,
+            "terrain_category": terrain_category,
+            "summary": {
+                "total_checked": total_pass + total_fail,
+                "total_passed": total_pass,
+                "total_failed": total_fail,
+                "pass_rate_pct": round(
+                    total_pass / (total_pass + total_fail) * 100, 1
+                ) if (total_pass + total_fail) > 0 else 0,
+            },
+            "per_opening_checks": per_opening,
+            "deflection_checks": deflection_checks,
+            "thermal_checks": thermal_checks,
+            "glass_stress_checks": glass_stress_checks,
+        }

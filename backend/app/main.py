@@ -405,7 +405,7 @@ async def get_estimate_v1(estimate_id: str, request: Request):
     Proxies to the ingestion route's get_estimate endpoint.
     """
     from app.db import AsyncSessionLocal
-    from app.models.orm_models import Estimate, Project
+    from app.models.orm_models import Estimate, Project, Tenant
     from fastapi import HTTPException
     from sqlalchemy import select
 
@@ -419,14 +419,39 @@ async def get_estimate_v1(estimate_id: str, request: Request):
             # Join with Project
             project_name = ""
             project_location = ""
+            execution_strategy = "IN_HOUSE_INSTALL"
+            is_international = False
             proj_result = await session.execute(select(Project).where(Project.id == estimate.project_id))
             project = proj_result.scalar_one_or_none()
             if project:
                 project_name = project.name or ""
                 project_location = project.location_zone or ""
+                execution_strategy = getattr(project, 'execution_strategy', 'IN_HOUSE_INSTALL') or 'IN_HOUSE_INSTALL'
+                is_international = getattr(project, 'is_international', False)
+
+            # MODULE 1: Load tenant settings for currency + branding
+            tenant_info = {}
+            try:
+                t_result = await session.execute(select(Tenant).where(Tenant.id == estimate.tenant_id))
+                tenant = t_result.scalar_one_or_none()
+                if tenant:
+                    tenant_info = {
+                        "company_name": tenant.company_name,
+                        "base_currency": tenant.base_currency,
+                        "theme_color_hex": tenant.theme_color_hex,
+                        "logo_url": tenant.logo_url,
+                        "monthly_factory_overhead": float(tenant.monthly_factory_overhead) if tenant.monthly_factory_overhead else 85000.0,
+                        "default_factory_burn_rate": float(tenant.default_factory_burn_rate) if tenant.default_factory_burn_rate else 13.0,
+                    }
+            except Exception:
+                pass
 
             bom = estimate.bom_output_json or {}
             state_snap = estimate.state_snapshot or {}
+
+            # MODULE 3: Engineering results — prefer dedicated column, fallback to state_snapshot
+            engineering = estimate.engineering_results_json or state_snap.get("engineering_results", {})
+            compliance = estimate.compliance_results_json or state_snap.get("compliance_results", {})
 
             return {
                 "id": str(estimate.id),
@@ -450,11 +475,18 @@ async def get_estimate_v1(estimate_id: str, request: Request):
                     "line_items": bom.get("items", []),
                     "financial_rates": bom.get("financial_rates", {}),
                 },
-                "engineering_results": state_snap.get("engineering_results", {}),
+                # MODULE 2: Execution strategy + international
+                "execution_strategy": execution_strategy,
+                "is_international": is_international,
+                # MODULE 3: Forensic deliverables — engineering proofs
+                "engineering_results": engineering,
+                "compliance_results": compliance,
                 "rfi_register": state_snap.get("rfi_log", []),
                 "ve_opportunities": state_snap.get("ve_suggestions", []),
-                "structural_results": state_snap.get("engineering_results", {}).get("deflection_checks", []),
+                "structural_results": engineering.get("deflection_checks", []),
                 "financial_summary": bom.get("summary", estimate.financial_json or {}),
+                # MODULE 1: Tenant info for frontend branding
+                "tenant": tenant_info,
             }
     except HTTPException:
         raise
@@ -496,10 +528,10 @@ async def approve_estimate(estimate_id: str, request: Request):
         estimate = result.scalar_one_or_none()
         if not estimate:
             raise HTTPException(status_code=404, detail="Estimate not found")
-        if estimate.status not in ("REVIEW_REQUIRED", "Processing"):
+        if estimate.status not in ("REVIEW_REQUIRED", "Processing", "Completed"):
             raise HTTPException(
                 status_code=400,
-                detail=f"Estimate status is '{estimate.status}' — can only approve REVIEW_REQUIRED estimates"
+                detail=f"Estimate status is '{estimate.status}' — can only approve REVIEW_REQUIRED/Processing/Completed estimates"
             )
         estimate.status = "APPROVED"
         estimate.approved_at = datetime.now(timezone.utc)
@@ -556,6 +588,54 @@ async def dispatch_estimate(estimate_id: str, request: Request):
         pass  # Worker may not be running in dev mode
 
     return {"estimate_id": estimate_id, "status": "DISPATCHED"}
+
+
+@app.delete("/api/v1/estimates/{estimate_id}")
+async def delete_estimate(estimate_id: str, request: Request):
+    """
+    Delete an estimate and its associated project.
+    Requires Admin role.
+    """
+    from app.db import AsyncSessionLocal
+    from app.models.orm_models import Estimate, Project
+    from fastapi import HTTPException
+    from sqlalchemy import select, delete as sa_delete
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = auth_header.split(" ", 1)[1]
+    from jose import jwt, JWTError
+    import os as _os
+    SECRET_KEY = _os.getenv("JWT_SECRET_KEY", "changethis_use_a_real_secret_in_production_64chars")
+    ALGORITHM = _os.getenv("JWT_ALGORITHM", "HS256")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if payload.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Estimate).where(Estimate.id == estimate_id))
+        estimate = result.scalar_one_or_none()
+        if not estimate:
+            raise HTTPException(status_code=404, detail="Estimate not found")
+        project_id = estimate.project_id
+        await session.delete(estimate)
+        # Also delete the parent project if it has no other estimates
+        if project_id:
+            remaining = await session.execute(
+                select(Estimate).where(Estimate.project_id == project_id, Estimate.id != estimate_id)
+            )
+            if not remaining.scalar_one_or_none():
+                proj = await session.execute(select(Project).where(Project.id == project_id))
+                project = proj.scalar_one_or_none()
+                if project:
+                    await session.delete(project)
+        await session.commit()
+
+    return {"deleted": True, "estimate_id": estimate_id}
 
 
 @app.post("/api/v1/seed/al-kabir")

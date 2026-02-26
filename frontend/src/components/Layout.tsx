@@ -95,13 +95,13 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     <>
       {/* Company branding */}
       <div className="px-4 py-5 flex items-center gap-3 border-b border-white/10">
-        <div className="w-9 h-9 rounded-md bg-[#d4a017] flex items-center justify-center text-[#002147] font-bold text-sm shrink-0">
+        <div className="w-9 h-9 rounded-md bg-white/10 border border-white/20 flex items-center justify-center text-white font-bold text-sm shrink-0">
           M
         </div>
         {(!collapsed || mobileOpen) && (
           <div className="flex flex-col min-w-0">
-            <h1 className="text-[13px] font-bold text-[#d4a017] leading-tight tracking-wide">MASAAD</h1>
-            <p className="text-[10px] text-white/70 font-medium leading-tight">Aluminium & Glass Works</p>
+            <h1 className="text-[13px] font-bold text-white leading-tight tracking-wide">MADINAT AL SAADA</h1>
+            <p className="text-[10px] text-white/50 font-medium leading-tight">Aluminium & Glass Works</p>
           </div>
         )}
       </div>
@@ -117,21 +117,26 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
               href={item.href}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-[13px] font-medium transition-all ${
                 isActive
-                  ? 'bg-[#1e3a5f] text-white border-l-[3px] border-[#d4a017]'
+                  ? 'bg-[#1e3a5f] text-white border-l-[3px] border-[#94a3b8]'
                   : 'text-white/60 hover:bg-[#1e3a5f]/50 hover:text-white border-l-[3px] border-transparent'
               }`}
             >
-              <item.icon size={18} className={isActive ? 'text-[#d4a017]' : 'text-white/50'} />
+              <item.icon size={18} className={isActive ? 'text-white' : 'text-white/50'} />
               {(!collapsed || mobileOpen) && <span>{item.name}</span>}
             </Link>
           );
         })}
       </nav>
 
+      {/* Masaad systems watermark */}
+      <div className="px-4 py-1.5">
+        <p className="text-[8px] text-white/20 text-center tracking-widest uppercase">Masaad Systems Architect</p>
+      </div>
+
       {/* User panel at bottom */}
       <div className="p-3 border-t border-white/10">
         <div className="flex items-center gap-3 px-2 py-2">
-          <div className="w-8 h-8 bg-[#1e3a5f] rounded-md flex items-center justify-center text-[#d4a017] text-xs font-bold shrink-0 border border-[#d4a017]/30">
+          <div className="w-8 h-8 bg-[#1e3a5f] rounded-md flex items-center justify-center text-white text-xs font-bold shrink-0 border border-white/20">
             {avatarLetter}
           </div>
           {(!collapsed || mobileOpen) && (
