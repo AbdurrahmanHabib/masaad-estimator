@@ -20,7 +20,6 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // If already authenticated, push to dashboard immediately
   useEffect(() => {
     if (isAuthenticated) {
       router.replace('/');
@@ -45,7 +44,6 @@ export default function LoginPage() {
       }
 
       const data = await res.json();
-      // Backend should return { access_token, user } or { token, user }
       const token: string = data.access_token ?? data.token;
       const user = data.user ?? {
         user_id: data.user_id,
@@ -96,7 +94,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#1e293b] flex items-center justify-center px-4">
+    <div className="min-h-screen bg-[#002147] flex items-center justify-center px-4">
       {/* Background grid decoration */}
       <div
         className="absolute inset-0 opacity-[0.03]"
@@ -109,41 +107,41 @@ export default function LoginPage() {
 
       <div className="relative w-full max-w-md">
         {/* Card */}
-        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
+        <div className="bg-white rounded-md shadow-2xl overflow-hidden">
           {/* Header */}
-          <div className="bg-[#1e293b] px-10 pt-10 pb-8 flex flex-col items-center gap-4">
+          <div className="bg-[#002147] px-10 pt-10 pb-8 flex flex-col items-center gap-4">
             <img
               src="/logo.png"
               alt="Madinat Al Saada Logo"
               className="w-16 h-16 object-contain"
             />
             <div className="text-center">
-              <h1 className="text-base font-black text-white uppercase tracking-tighter">
+              <h1 className="text-base font-bold text-[#d4a017] uppercase tracking-wider">
                 Madinat Al Saada
               </h1>
-              <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-[0.25em] mt-0.5">
-                Estimator Pro
+              <p className="text-[10px] text-white/70 font-medium uppercase tracking-[0.25em] mt-0.5">
+                Aluminium & Glass Works
               </p>
             </div>
 
             {/* Tabs */}
-            <div className="flex w-full mt-2 bg-slate-800/60 rounded-xl p-1 gap-1">
+            <div className="flex w-full mt-2 bg-[#1e3a5f]/60 rounded-md p-1 gap-1">
               <button
                 onClick={() => { setTab('login'); setError(null); setSuccess(null); }}
-                className={`flex-1 py-2 text-[11px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-widest rounded-md transition-all ${
                   tab === 'login'
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-[#d4a017] text-[#002147]'
+                    : 'text-white/60 hover:text-white'
                 }`}
               >
                 Sign In
               </button>
               <button
                 onClick={() => { setTab('register'); setError(null); setSuccess(null); }}
-                className={`flex-1 py-2 text-[11px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                className={`flex-1 py-2 text-[11px] font-bold uppercase tracking-widest rounded-md transition-all ${
                   tab === 'register'
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-[#d4a017] text-[#002147]'
+                    : 'text-white/60 hover:text-white'
                 }`}
               >
                 Register
@@ -155,14 +153,14 @@ export default function LoginPage() {
           <div className="px-10 py-8">
             {/* Success banner */}
             {success && (
-              <div className="mb-6 flex items-center gap-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl px-4 py-3 text-xs font-semibold">
+              <div className="mb-6 flex items-center gap-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-md px-4 py-3 text-xs font-semibold">
                 <span>{success}</span>
               </div>
             )}
 
             {/* Error banner */}
             {error && (
-              <div className="mb-6 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-xs font-semibold">
+              <div className="mb-6 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-xs font-semibold">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -171,7 +169,7 @@ export default function LoginPage() {
             {tab === 'login' ? (
               <form onSubmit={handleLogin} className="space-y-5">
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-[#64748b] mb-2">
                     Email Address
                   </label>
                   <input
@@ -181,12 +179,12 @@ export default function LoginPage() {
                     required
                     autoComplete="email"
                     placeholder="you@example.com"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-medium text-slate-800 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none placeholder:text-slate-300"
+                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-[#64748b] mb-2">
                     Password
                   </label>
                   <div className="relative">
@@ -196,13 +194,13 @@ export default function LoginPage() {
                       onChange={(e) => setPassword(e.target.value)}
                       required
                       autoComplete="current-password"
-                      placeholder="••••••••"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 pr-12 text-sm font-medium text-slate-800 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none placeholder:text-slate-300"
+                      placeholder="--------"
+                      className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 pr-12 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#1e293b] transition-colors"
                     >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -212,7 +210,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 mt-2"
+                  className="w-full bg-[#002147] hover:bg-[#1e3a5f] disabled:bg-slate-300 text-white py-3.5 rounded-md text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 mt-2"
                 >
                   {loading ? (
                     <>
@@ -261,13 +259,13 @@ export default function LoginPage() {
                       setLoading(false);
                     }
                   }}
-                  className="w-full mt-3 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-200"
+                  className="w-full mt-3 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-[#64748b] py-3 rounded-md text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-[#e2e8f0]"
                 >
                   {loading ? (
                     <Loader2 size={14} className="animate-spin" />
                   ) : (
                     <>
-                      <span className="text-[10px] font-black text-slate-400">DEV</span>
+                      <span className="text-[10px] font-bold text-[#64748b]">DEV</span>
                       Demo Login
                     </>
                   )}
@@ -276,7 +274,7 @@ export default function LoginPage() {
             ) : (
               <form onSubmit={handleRegister} className="space-y-5">
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-[#64748b] mb-2">
                     Full Name
                   </label>
                   <input
@@ -286,12 +284,12 @@ export default function LoginPage() {
                     required
                     autoComplete="name"
                     placeholder="Your full name"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-medium text-slate-800 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none placeholder:text-slate-300"
+                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-[#64748b] mb-2">
                     Email Address
                   </label>
                   <input
@@ -301,12 +299,12 @@ export default function LoginPage() {
                     required
                     autoComplete="email"
                     placeholder="you@example.com"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-medium text-slate-800 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none placeholder:text-slate-300"
+                    className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-[#64748b] mb-2">
                     Password
                   </label>
                   <div className="relative">
@@ -318,12 +316,12 @@ export default function LoginPage() {
                       autoComplete="new-password"
                       placeholder="Min 8 characters"
                       minLength={8}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 pr-12 text-sm font-medium text-slate-800 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none placeholder:text-slate-300"
+                      className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-3 px-4 pr-12 text-sm font-medium text-[#1e293b] focus:ring-2 focus:ring-[#d4a017]/30 focus:border-[#002147] transition-all outline-none placeholder:text-slate-300"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#1e293b] transition-colors"
                     >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
@@ -333,7 +331,7 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white py-3.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2 mt-2"
+                  className="w-full bg-[#002147] hover:bg-[#1e3a5f] disabled:bg-slate-300 text-white py-3.5 rounded-md text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 mt-2"
                 >
                   {loading ? (
                     <>
@@ -347,13 +345,13 @@ export default function LoginPage() {
               </form>
             )}
 
-            <p className="mt-6 text-center text-[10px] text-slate-400 font-medium uppercase tracking-widest">
-              Secure · Encrypted · Enterprise Grade
+            <p className="mt-6 text-center text-[10px] text-[#64748b] font-medium uppercase tracking-widest">
+              Secure -- Encrypted -- Enterprise Grade
             </p>
           </div>
         </div>
 
-        <p className="mt-6 text-center text-[10px] text-slate-500 font-medium">
+        <p className="mt-6 text-center text-[10px] text-white/50 font-medium">
           &copy; {new Date().getFullYear()} Madinat Al Saada Group. All rights reserved.
         </p>
       </div>

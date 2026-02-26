@@ -26,7 +26,7 @@ export default function EstimateNav({ estimateId, status }: EstimateNavProps) {
   const router = useRouter();
 
   return (
-    <nav className="flex items-center gap-1 mb-6 bg-gray-900 border border-gray-700 rounded-xl p-1">
+    <nav className="flex items-center gap-1 mb-6 bg-white border border-[#e2e8f0] rounded-md p-1 shadow-sm">
       {navItems(estimateId).map(({ label, href, icon: Icon }) => {
         const isActive = router.asPath === href;
         const isApprove = label === 'Approve';
@@ -34,18 +34,18 @@ export default function EstimateNav({ estimateId, status }: EstimateNavProps) {
         return (
           <Link key={href} href={href}>
             <span
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-all ${
                 isActive
-                  ? 'bg-blue-700 text-white'
+                  ? 'bg-[#002147] text-white'
                   : isApprove && status === 'REVIEW_REQUIRED'
-                  ? 'bg-amber-900/40 text-amber-300 hover:bg-amber-900/60 border border-amber-700/50 animate-pulse'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+                  ? 'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 animate-pulse'
+                  : 'text-[#64748b] hover:text-[#002147] hover:bg-slate-50'
               }`}
             >
               <Icon size={14} />
               {label}
               {isApprove && status === 'REVIEW_REQUIRED' && (
-                <span className="w-2 h-2 rounded-full bg-amber-400 ml-1" />
+                <span className="w-2 h-2 rounded-full bg-[#d4a017] ml-1" />
               )}
             </span>
           </Link>

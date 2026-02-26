@@ -104,6 +104,7 @@ class PanelInfo:
     count: int = 1
     source: str = ""  # "geometry" or "text_annotation"
     layer: str = ""
+    entity_idx: int = -1  # index into entity_bounds_for_clustering for spatial dedup
 
 
 @dataclass
@@ -115,6 +116,7 @@ class OpeningInfo:
     block_name: str = ""
     count: int = 1
     layer: str = ""
+    entity_idx: int = -1  # index into entity_bounds_for_clustering for spatial dedup
 
 
 @dataclass
@@ -615,6 +617,7 @@ class DWGParserService:
                                     area_sqm=round(w * h / 1e6, 4),
                                     source="geometry",
                                     layer=layer,
+                                    entity_idx=entity_idx,
                                 ))
 
                     # ── Circles → holes, fixings ──────────────────────────
@@ -638,6 +641,7 @@ class DWGParserService:
                                     area_sqm=round(w * h / 1e6, 4),
                                     source="text_annotation",
                                     layer=layer,
+                                    entity_idx=entity_idx,
                                 ))
                             # Also store raw dimension text
                             if dims or any(c.isdigit() for c in txt):
@@ -717,6 +721,7 @@ class DWGParserService:
                                         area_sqm=round(w * h / 1e6, 4),
                                         block_name=block_name,
                                         layer=layer,
+                                        entity_idx=entity_idx,
                                     ))
                         except Exception as e:
                             logger.debug(f"Error processing INSERT: {e}")
@@ -754,40 +759,103 @@ class DWGParserService:
                 f"(possible overlapping drawings in model space)"
             )
 
-        # ── Deduplicate panels (merge identical dimensions) ───────────────────
-        panel_counts: dict[tuple[float, float, str], PanelInfo] = {}
-        for p in all_panels:
-            key = (p.width_mm, p.height_mm, p.source)
-            if key in panel_counts:
-                panel_counts[key].count += 1
-            else:
-                panel_counts[key] = PanelInfo(
-                    width_mm=p.width_mm,
-                    height_mm=p.height_mm,
-                    area_sqm=p.area_sqm,
-                    count=1,
-                    source=p.source,
-                    layer=p.layer,
-                )
-        deduped_panels = list(panel_counts.values())
+        # Build entity_idx → cluster_id mapping for spatial deduplication
+        entity_to_cluster: dict[int, int] = {}
+        for cluster_id, entity_indices in enumerate(clusters):
+            for eidx in entity_indices:
+                entity_to_cluster[eidx] = cluster_id
 
-        # ── Deduplicate openings ──────────────────────────────────────────────
-        opening_counts: dict[tuple[str, float, float], OpeningInfo] = {}
-        for o in all_openings:
-            key = (o.block_name or o.type, o.width_mm, o.height_mm)
-            if key in opening_counts:
-                opening_counts[key].count += 1
-            else:
-                opening_counts[key] = OpeningInfo(
-                    type=o.type,
-                    width_mm=o.width_mm,
-                    height_mm=o.height_mm,
-                    area_sqm=o.area_sqm,
-                    block_name=o.block_name,
-                    count=1,
-                    layer=o.layer,
-                )
-        deduped_openings = list(opening_counts.values())
+        # ── Deduplicate panels with spatial-cluster awareness ─────────────────
+        # When multiple spatial clusters exist (overlapping drawing views),
+        # the same panel may appear in each view. We count per-cluster first,
+        # then take the MAX count across clusters (not the sum) to avoid
+        # double-counting panels drawn in multiple overlapping views.
+        if len(clusters) > 1:
+            # Phase 1: count panels per (dimension_key, cluster_id)
+            # key = (width, height, source), value = {cluster_id: count}
+            cluster_panel_counts: dict[tuple[float, float, str], dict[int, int]] = {}
+            cluster_panel_meta: dict[tuple[float, float, str], PanelInfo] = {}
+            for p in all_panels:
+                dim_key = (p.width_mm, p.height_mm, p.source)
+                cid = entity_to_cluster.get(p.entity_idx, 0)
+                if dim_key not in cluster_panel_counts:
+                    cluster_panel_counts[dim_key] = {}
+                    cluster_panel_meta[dim_key] = p
+                cluster_panel_counts[dim_key][cid] = cluster_panel_counts[dim_key].get(cid, 0) + 1
+
+            # Phase 2: for each panel dimension, take MAX count across clusters
+            deduped_panels: list[PanelInfo] = []
+            for dim_key, counts_by_cluster in cluster_panel_counts.items():
+                max_count = max(counts_by_cluster.values())
+                meta = cluster_panel_meta[dim_key]
+                deduped_panels.append(PanelInfo(
+                    width_mm=meta.width_mm,
+                    height_mm=meta.height_mm,
+                    area_sqm=meta.area_sqm,
+                    count=max_count,
+                    source=meta.source,
+                    layer=meta.layer,
+                ))
+        else:
+            # Single cluster or no clusters: simple merge by dimension
+            panel_counts: dict[tuple[float, float, str], PanelInfo] = {}
+            for p in all_panels:
+                key = (p.width_mm, p.height_mm, p.source)
+                if key in panel_counts:
+                    panel_counts[key].count += 1
+                else:
+                    panel_counts[key] = PanelInfo(
+                        width_mm=p.width_mm,
+                        height_mm=p.height_mm,
+                        area_sqm=p.area_sqm,
+                        count=1,
+                        source=p.source,
+                        layer=p.layer,
+                    )
+            deduped_panels = list(panel_counts.values())
+
+        # ── Deduplicate openings with spatial-cluster awareness ───────────────
+        if len(clusters) > 1:
+            cluster_opening_counts: dict[tuple[str, float, float], dict[int, int]] = {}
+            cluster_opening_meta: dict[tuple[str, float, float], OpeningInfo] = {}
+            for o in all_openings:
+                dim_key = (o.block_name or o.type, o.width_mm, o.height_mm)
+                cid = entity_to_cluster.get(o.entity_idx, 0)
+                if dim_key not in cluster_opening_counts:
+                    cluster_opening_counts[dim_key] = {}
+                    cluster_opening_meta[dim_key] = o
+                cluster_opening_counts[dim_key][cid] = cluster_opening_counts[dim_key].get(cid, 0) + 1
+
+            deduped_openings: list[OpeningInfo] = []
+            for dim_key, counts_by_cluster in cluster_opening_counts.items():
+                max_count = max(counts_by_cluster.values())
+                meta = cluster_opening_meta[dim_key]
+                deduped_openings.append(OpeningInfo(
+                    type=meta.type,
+                    width_mm=meta.width_mm,
+                    height_mm=meta.height_mm,
+                    area_sqm=meta.area_sqm,
+                    block_name=meta.block_name,
+                    count=max_count,
+                    layer=meta.layer,
+                ))
+        else:
+            opening_counts: dict[tuple[str, float, float], OpeningInfo] = {}
+            for o in all_openings:
+                key = (o.block_name or o.type, o.width_mm, o.height_mm)
+                if key in opening_counts:
+                    opening_counts[key].count += 1
+                else:
+                    opening_counts[key] = OpeningInfo(
+                        type=o.type,
+                        width_mm=o.width_mm,
+                        height_mm=o.height_mm,
+                        area_sqm=o.area_sqm,
+                        block_name=o.block_name,
+                        count=1,
+                        layer=o.layer,
+                    )
+            deduped_openings = list(opening_counts.values())
 
         # ── Compute total facade area ─────────────────────────────────────────
         total_facade_area = sum(p.area_sqm * p.count for p in deduped_panels)

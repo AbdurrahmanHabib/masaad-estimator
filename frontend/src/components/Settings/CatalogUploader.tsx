@@ -14,30 +14,30 @@ const CatalogUploader = () => {
   };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 p-6 shadow-2xl relative group overflow-hidden rounded-sm">
-      <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
-        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-          Zone 3: Supplier Catalogs
+    <div className="bg-white border border-[#e2e8f0] p-6 shadow-card rounded-xl">
+      <div className="flex items-center justify-between mb-4 border-b border-[#e2e8f0] pb-3">
+        <h3 className="text-sm font-bold text-[#0f172a] flex items-center gap-2">
+          Supplier Catalogs
         </h3>
-        <button 
+        <button
           onClick={downloadTemplate}
-          className="flex items-center gap-2 text-[9px] font-black text-ms-glass hover:text-white transition-colors border border-ms-glass/30 px-2 py-1 rounded-sm uppercase tracking-tighter"
+          className="flex items-center gap-2 text-xs font-medium text-[#3b82f6] hover:text-[#1e3a5f] transition-colors border border-[#e2e8f0] px-3 py-1.5 rounded-lg hover:bg-slate-50"
         >
-          <Download size={10} /> Download CSV Template
+          <Download size={12} /> Download CSV Template
         </button>
       </div>
-      
-      <div className="border-2 border-dashed border-slate-800 hover:border-ms-glass/50 bg-slate-950/50 p-8 text-center cursor-pointer transition-colors rounded-sm">
-        <Upload size={24} className="mx-auto text-slate-600 mb-3" />
-        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Drag & Drop Catalog .CSV</p>
-        <p className="text-[9px] text-slate-600 font-mono italic">
-          // Enforces strict typing for Weight_kg_m & Perimeter_mm
+
+      <div className="border-2 border-dashed border-[#e2e8f0] hover:border-[#3b82f6] bg-slate-50 p-8 text-center cursor-pointer transition-all rounded-xl group hover:bg-blue-50/50">
+        <Upload size={24} className="mx-auto text-[#64748b] mb-3 group-hover:text-[#3b82f6] transition-colors" />
+        <p className="text-xs font-semibold text-[#374151] mb-1">Drag & Drop Catalog CSV</p>
+        <p className="text-[10px] text-[#64748b]">
+          Strict typing enforced for Weight_kg_m and Perimeter_mm fields
         </p>
       </div>
 
-      <div className="mt-4 flex items-center gap-2 bg-emerald-500/5 p-3 rounded-sm border border-emerald-500/10">
-        <ShieldCheck size={14} className="text-ms-emerald" />
-        <p className="text-[9px] font-mono text-emerald-500/70 uppercase">
+      <div className="mt-4 flex items-center gap-2 bg-emerald-50 p-3 rounded-lg border border-emerald-200">
+        <ShieldCheck size={14} className="text-[#10b981]" />
+        <p className="text-[10px] text-emerald-700 font-medium">
           Validation Gate Active: Non-float values will trigger RFI
         </p>
       </div>

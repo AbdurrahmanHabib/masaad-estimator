@@ -133,7 +133,7 @@ async def get_cashflow(
     state = await _get_estimate_state(estimate_id, tenant_id, db)
     scurve = state.get("scurve_cashflow")
     if not scurve:
-        raise HTTPException(status_code=404, detail="Cash flow not yet generated — run estimate first")
+        return {"status": "pending", "cashflow_months": []}
     return scurve
 
 
@@ -167,7 +167,7 @@ async def get_milestones(
     state = await _get_estimate_state(estimate_id, tenant_id, db)
     sched = state.get("milestone_schedule")
     if not sched:
-        raise HTTPException(status_code=404, detail="Milestone schedule not yet generated")
+        return {"status": "pending", "milestones": []}
     return sched
 
 
@@ -184,7 +184,7 @@ async def get_yield_report(
     state = await _get_estimate_state(estimate_id, tenant_id, db)
     report = state.get("yield_report")
     if not report:
-        raise HTTPException(status_code=404, detail="Yield report not yet generated")
+        return {"status": "pending", "yield_data": []}
     return report
 
 
@@ -320,7 +320,7 @@ async def get_ve_menu(
     state = await _get_estimate_state(estimate_id, tenant_id, db)
     ve_menu = state.get("ve_menu")
     if not ve_menu:
-        raise HTTPException(status_code=404, detail="VE menu not yet generated")
+        return {"ve_items": [], "message": "No VE opportunities generated yet"}
     return ve_menu
 
 
@@ -374,5 +374,5 @@ async def get_compliance_report(
     state = await _get_estimate_state(estimate_id, tenant_id, db)
     report = state.get("compliance_report")
     if not report:
-        raise HTTPException(status_code=404, detail="Compliance report not yet generated")
+        return {"status": "pending", "checks": [], "message": "Compliance analysis not yet generated"}
     return report

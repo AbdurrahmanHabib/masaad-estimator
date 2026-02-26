@@ -9,8 +9,8 @@ import { getAuthHeaders } from '../store/useAuthStore';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-const INPUT_CLS = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white';
-const LABEL_CLS = 'block text-xs font-semibold text-slate-600 mb-1';
+const INPUT_CLS = 'w-full border border-[#e2e8f0] rounded-md px-3 py-2 text-sm text-[#1e293b] focus:outline-none focus:ring-2 focus:ring-[#002147]/20 focus:border-[#002147] bg-white transition-all';
+const LABEL_CLS = 'block text-xs font-semibold text-[#002147] mb-1';
 const SELECT_CLS = `${INPUT_CLS} appearance-none`;
 
 const COUNTRIES = [
@@ -142,20 +142,20 @@ const ProjectIngestion = () => {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+    <div className="flex-1 overflow-y-auto p-6 bg-[#f8fafc]">
       <div className="max-w-3xl mx-auto space-y-5">
 
         {/* Header */}
         <div>
-          <h2 className="text-lg font-bold text-slate-800">New Estimate</h2>
-          <p className="text-sm text-slate-500 mt-0.5">Upload drawings and specifications to start AI-powered estimation.</p>
+          <h2 className="text-lg font-bold text-[#1e293b]">New Estimate</h2>
+          <p className="text-sm text-[#64748b] mt-0.5">Upload drawings and specifications to start AI-powered estimation.</p>
         </div>
 
         {/* Project Details */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5 space-y-4">
-          <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-            <Building2 size={16} className="text-slate-500" />
-            <h3 className="text-sm font-semibold text-slate-700">Project Details</h3>
+        <div className="bg-white rounded-md border border-[#e2e8f0] p-5 space-y-4 shadow-sm">
+          <div className="flex items-center gap-2 pb-2 border-b border-[#e2e8f0]">
+            <Building2 size={16} className="text-[#002147]" />
+            <h3 className="text-sm font-semibold text-[#002147]">Project Details</h3>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -199,26 +199,26 @@ const ProjectIngestion = () => {
               <div className="flex items-center gap-2">
                 <input type="range" min={0.5} max={2.0} step={0.1} value={complexity}
                   onChange={(e) => setComplexity(Number(e.target.value))} className="flex-1 h-2" />
-                <span className="text-sm font-mono font-semibold text-blue-600 w-10 text-right">{complexity.toFixed(1)}x</span>
+                <span className="text-sm font-mono font-semibold text-[#002147] w-10 text-right">{complexity.toFixed(1)}x</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Advanced: Estimator Context */}
-        <div className="bg-white rounded-lg border border-slate-200">
+        <div className="bg-white rounded-md border border-[#e2e8f0] shadow-sm">
           <button type="button" onClick={() => setShowAdvanced(!showAdvanced)}
-            className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-slate-50 transition-colors">
+            className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-slate-50 transition-colors rounded-md">
             <div className="flex items-center gap-2">
-              <ClipboardList size={16} className="text-slate-500" />
-              <span className="text-sm font-semibold text-slate-700">Estimator Context</span>
-              <span className="text-xs text-slate-400">(optional — helps AI produce a more accurate estimate)</span>
+              <ClipboardList size={16} className="text-[#002147]" />
+              <span className="text-sm font-semibold text-[#1e293b]">Estimator Context</span>
+              <span className="text-xs text-[#64748b]">(optional -- helps AI produce a more accurate estimate)</span>
             </div>
-            {showAdvanced ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
+            {showAdvanced ? <ChevronUp size={16} className="text-[#64748b]" /> : <ChevronDown size={16} className="text-[#64748b]" />}
           </button>
 
           {showAdvanced && (
-            <div className="px-5 pb-5 space-y-4 border-t border-slate-100 pt-4">
+            <div className="px-5 pb-5 space-y-4 border-t border-[#e2e8f0] pt-4">
               {/* Site Conditions */}
               <div>
                 <label className={LABEL_CLS}>Site Conditions</label>
@@ -227,8 +227,8 @@ const ProjectIngestion = () => {
                     <button key={sc.value} type="button" onClick={() => toggleSiteCondition(sc.value)}
                       className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${
                         siteConditions.includes(sc.value)
-                          ? 'bg-blue-50 border-blue-300 text-blue-700 font-semibold'
-                          : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                          ? 'bg-blue-50 border-[#002147] text-[#002147] font-semibold'
+                          : 'bg-white border-[#e2e8f0] text-[#374151] hover:border-slate-300'
                       }`}>
                       {sc.label}
                     </button>
@@ -277,18 +277,18 @@ const ProjectIngestion = () => {
         </div>
 
         {/* File Upload */}
-        <div className="bg-white rounded-lg border border-slate-200 p-5">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-100 mb-4">
-            <Upload size={16} className="text-slate-500" />
-            <h3 className="text-sm font-semibold text-slate-700">Upload Files</h3>
-            <span className="text-xs text-slate-400 ml-auto">At least one file required</span>
+        <div className="bg-white rounded-md border border-[#e2e8f0] p-5 shadow-sm">
+          <div className="flex items-center gap-2 pb-3 border-b border-[#e2e8f0] mb-4">
+            <Upload size={16} className="text-[#002147]" />
+            <h3 className="text-sm font-semibold text-[#1e293b]">Upload Files</h3>
+            <span className="text-xs text-[#64748b] ml-auto">At least one file required</span>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             {/* DWG */}
             <input ref={dwgRef} type="file" accept=".dwg,.dxf" className="hidden" onChange={(e) => setDwgFile(e.target.files?.[0] ?? null)} />
             <button type="button" onClick={() => dwgRef.current?.click()}
-              className={`border-2 border-dashed rounded-lg p-4 text-center transition-all hover:border-blue-400 ${dwgFile ? 'border-green-400 bg-green-50' : 'border-slate-200 hover:bg-blue-50'}`}>
+              className={`border-2 border-dashed rounded-md p-4 text-center transition-all hover:border-[#002147] ${dwgFile ? 'border-emerald-400 bg-emerald-50' : 'border-[#e2e8f0] hover:bg-blue-50/50'}`}>
               {dwgFile ? (
                 <>
                   <CheckCircle2 size={20} className="mx-auto text-green-500 mb-1.5" />
@@ -297,9 +297,9 @@ const ProjectIngestion = () => {
                 </>
               ) : (
                 <>
-                  <Upload size={20} className="mx-auto text-slate-300 mb-1.5" />
-                  <p className="text-xs font-semibold text-slate-600">DWG / DXF</p>
-                  <p className="text-[11px] text-slate-400">Drawing file</p>
+                  <Upload size={20} className="mx-auto text-[#64748b] mb-1.5" />
+                  <p className="text-xs font-semibold text-[#374151]">DWG / DXF</p>
+                  <p className="text-[11px] text-[#64748b]">Drawing file</p>
                 </>
               )}
             </button>
@@ -307,7 +307,7 @@ const ProjectIngestion = () => {
             {/* PDF Spec */}
             <input ref={specRef} type="file" accept=".pdf,.docx,.doc" className="hidden" onChange={(e) => setSpecFile(e.target.files?.[0] ?? null)} />
             <button type="button" onClick={() => specRef.current?.click()}
-              className={`border-2 border-dashed rounded-lg p-4 text-center transition-all hover:border-blue-400 ${specFile ? 'border-blue-400 bg-blue-50' : 'border-slate-200 hover:bg-blue-50'}`}>
+              className={`border-2 border-dashed rounded-md p-4 text-center transition-all hover:border-[#002147] ${specFile ? 'border-[#3b82f6] bg-blue-50' : 'border-[#e2e8f0] hover:bg-blue-50/50'}`}>
               {specFile ? (
                 <>
                   <CheckCircle2 size={20} className="mx-auto text-blue-500 mb-1.5" />
@@ -316,9 +316,9 @@ const ProjectIngestion = () => {
                 </>
               ) : (
                 <>
-                  <FileText size={20} className="mx-auto text-slate-300 mb-1.5" />
-                  <p className="text-xs font-semibold text-slate-600">PDF / DOCX</p>
-                  <p className="text-[11px] text-slate-400">Specification</p>
+                  <FileText size={20} className="mx-auto text-[#64748b] mb-1.5" />
+                  <p className="text-xs font-semibold text-[#374151]">PDF / DOCX</p>
+                  <p className="text-[11px] text-[#64748b]">Specification</p>
                 </>
               )}
             </button>
@@ -326,7 +326,7 @@ const ProjectIngestion = () => {
             {/* Extra file */}
             <input ref={extraRef} type="file" className="hidden" onChange={(e) => setExtraFile(e.target.files?.[0] ?? null)} />
             <button type="button" onClick={() => extraRef.current?.click()}
-              className={`border-2 border-dashed rounded-lg p-4 text-center transition-all hover:border-blue-400 ${extraFile ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:bg-blue-50'}`}>
+              className={`border-2 border-dashed rounded-md p-4 text-center transition-all hover:border-[#002147] ${extraFile ? 'border-amber-400 bg-amber-50' : 'border-[#e2e8f0] hover:bg-blue-50/50'}`}>
               {extraFile ? (
                 <>
                   <CheckCircle2 size={20} className="mx-auto text-amber-500 mb-1.5" />
@@ -335,9 +335,9 @@ const ProjectIngestion = () => {
                 </>
               ) : (
                 <>
-                  <FileWarning size={20} className="mx-auto text-slate-300 mb-1.5" />
-                  <p className="text-xs font-semibold text-slate-600">Extra File</p>
-                  <p className="text-[11px] text-slate-400">BOQ, photos, etc.</p>
+                  <FileWarning size={20} className="mx-auto text-[#64748b] mb-1.5" />
+                  <p className="text-xs font-semibold text-[#374151]">Extra File</p>
+                  <p className="text-[11px] text-[#64748b]">BOQ, photos, etc.</p>
                 </>
               )}
             </button>
@@ -346,7 +346,7 @@ const ProjectIngestion = () => {
 
         {/* Error */}
         {error && (
-          <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">
             <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
             <span>{error}</span>
           </div>
@@ -354,7 +354,7 @@ const ProjectIngestion = () => {
 
         {/* Submit */}
         <button onClick={handleSubmit} disabled={isProcessing}
-          className="w-full flex items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white py-3 rounded-lg font-semibold text-sm transition-all">
+          className="w-full flex items-center justify-center gap-3 bg-[#002147] hover:bg-[#1e3a5f] disabled:bg-slate-300 text-white py-3 rounded-md font-semibold text-sm transition-all">
           {isProcessing ? (
             <><Loader2 size={16} className="animate-spin" /> Submitting...</>
           ) : (

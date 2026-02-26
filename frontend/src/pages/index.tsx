@@ -15,7 +15,7 @@ import {
 import { useAuthStore } from '../store/useAuthStore';
 import { apiGet } from '../lib/api';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 interface DashboardSummary {
   total_projects?: number;
@@ -40,16 +40,14 @@ interface RecentEstimate {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  ESTIMATING: 'bg-blue-50 text-blue-700 border-blue-200',
+  ESTIMATING: 'bg-blue-50 text-[#002147] border-blue-200',
   REVIEW_REQUIRED: 'bg-amber-50 text-amber-700 border-amber-200',
-  APPROVED: 'bg-green-50 text-green-700 border-green-200',
+  APPROVED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   DISPATCHED: 'bg-purple-50 text-purple-700 border-purple-200',
-  Completed: 'bg-slate-50 text-slate-500 border-slate-200',
-  Queued: 'bg-blue-50 text-blue-600 border-blue-200',
+  Completed: 'bg-slate-50 text-[#64748b] border-slate-200',
+  Queued: 'bg-blue-50 text-[#002147] border-blue-200',
   Failed: 'bg-red-50 text-red-600 border-red-200',
 };
-
-// ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { user } = useAuthStore();
@@ -69,7 +67,7 @@ export default function Dashboard() {
         const data = await apiGet<DashboardSummary>('/api/dashboard/summary');
         setSummary(data);
       } catch {
-        // Keep null -- UI handles gracefully
+        // Keep null
       }
 
       try {
@@ -91,23 +89,22 @@ export default function Dashboard() {
   const activeProjects = summary?.total_projects ?? summary?.active_processing ?? recentEstimates.length;
   const totalEstimates = summary?.total_estimates ?? recentEstimates.length;
   const reviewRequired = recentEstimates.filter(e => e.status === 'REVIEW_REQUIRED').length;
-  const rfis = summary?.technical_rfis ?? 0;
 
   return (
-    <div className="space-y-8">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-4">
+    <div className="space-y-6">
+      {/* WELCOME BANNER */}
+      <div className="bg-gradient-to-r from-[#002147] to-[#1e3a5f] rounded-md p-6 flex flex-col sm:flex-row justify-between sm:items-end gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">
+          <h1 className="text-xl font-bold text-white">
             Welcome back, {firstName}
           </h1>
-          <p className="text-slate-500 text-sm mt-1">
+          <p className="text-white/60 text-sm mt-1">
             Here is an overview of your estimation projects.
           </p>
         </div>
         <Link
           href="/estimate/new"
-          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2 shrink-0"
+          className="px-5 py-2.5 bg-[#002147] hover:bg-[#1e3a5f] border border-white/20 text-white rounded-md text-sm font-medium transition-all flex items-center gap-2 shrink-0"
         >
           <Plus size={16} /> New Estimation
         </Link>
@@ -115,57 +112,33 @@ export default function Dashboard() {
 
       {/* STAT CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <div className="flex items-center gap-2 text-slate-500 text-xs mb-2">
-            <Briefcase size={14} /> Active Projects
+        {[
+          { label: 'Active Projects', value: activeProjects, icon: Briefcase, borderColor: 'border-l-[#3b82f6]' },
+          { label: 'Total Estimates', value: totalEstimates, icon: FileText, borderColor: 'border-l-[#059669]' },
+          { label: 'Pending Review', value: reviewRequired, icon: AlertCircle, borderColor: 'border-l-[#d97706]' },
+          { label: 'Factory Margin', value: summary?.factory_margin_pct !== undefined ? `${summary.factory_margin_pct}%` : '18%', icon: TrendingUp, borderColor: 'border-l-[#002147]' },
+        ].map((card) => (
+          <div key={card.label} className={`bg-white border border-[#e2e8f0] border-l-4 ${card.borderColor} rounded-md p-6 shadow-sm`}>
+            <div className="flex items-center gap-2 mb-3">
+              <card.icon size={16} className="text-[#64748b]" />
+              <span className="text-xs font-medium text-[#64748b]">{card.label}</span>
+            </div>
+            {loading ? (
+              <div className="h-7 bg-slate-100 rounded animate-pulse w-16" />
+            ) : (
+              <p className="text-2xl font-bold text-[#1e293b] font-mono">{card.value}</p>
+            )}
           </div>
-          {loading ? (
-            <div className="h-7 bg-slate-100 rounded animate-pulse w-16" />
-          ) : (
-            <p className="text-2xl font-bold text-slate-800 font-mono">{activeProjects}</p>
-          )}
-        </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <div className="flex items-center gap-2 text-slate-500 text-xs mb-2">
-            <FileText size={14} /> Total Estimates
-          </div>
-          {loading ? (
-            <div className="h-7 bg-slate-100 rounded animate-pulse w-16" />
-          ) : (
-            <p className="text-2xl font-bold text-slate-800 font-mono">{totalEstimates}</p>
-          )}
-        </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <div className="flex items-center gap-2 text-amber-600 text-xs mb-2">
-            <AlertCircle size={14} /> Pending Review
-          </div>
-          {loading ? (
-            <div className="h-7 bg-slate-100 rounded animate-pulse w-16" />
-          ) : (
-            <p className="text-2xl font-bold text-slate-800 font-mono">{reviewRequired}</p>
-          )}
-        </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <div className="flex items-center gap-2 text-slate-500 text-xs mb-2">
-            <TrendingUp size={14} /> Factory Margin
-          </div>
-          {loading ? (
-            <div className="h-7 bg-slate-100 rounded animate-pulse w-16" />
-          ) : (
-            <p className="text-2xl font-bold text-slate-800 font-mono">
-              {summary?.factory_margin_pct !== undefined ? `${summary.factory_margin_pct}%` : '18%'}
-            </p>
-          )}
-        </div>
+        ))}
       </div>
 
       {/* RECENT ESTIMATES TABLE */}
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-          <h3 className="text-sm font-semibold text-slate-800">Recent Estimates</h3>
+      <div className="bg-white border border-[#e2e8f0] rounded-md overflow-hidden shadow-sm">
+        <div className="px-6 py-4 border-b border-[#e2e8f0] flex justify-between items-center">
+          <h3 className="text-sm font-semibold text-[#1e293b]">Recent Estimates</h3>
           <Link
             href="/estimate/new"
-            className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1 transition-colors"
+            className="text-xs text-[#002147] hover:text-[#1e3a5f] font-medium flex items-center gap-1 transition-colors"
           >
             New Estimation <ChevronRight size={12} />
           </Link>
@@ -178,7 +151,7 @@ export default function Dashboard() {
         )}
 
         {!loading && recentEstimates.length === 0 && (
-          <div className="px-6 py-12 text-center text-slate-400">
+          <div className="px-6 py-12 text-center text-[#64748b]">
             <Building2 size={36} className="mx-auto mb-3 opacity-30" />
             <p className="text-sm font-medium">No estimates yet</p>
             <p className="text-xs mt-1">Create your first estimation to get started.</p>
@@ -189,45 +162,45 @@ export default function Dashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="text-left py-3 px-6 font-semibold text-slate-600 text-xs">Project</th>
-                  <th className="text-left py-3 px-4 font-semibold text-slate-600 text-xs">Client</th>
-                  <th className="text-left py-3 px-4 font-semibold text-slate-600 text-xs">Location</th>
-                  <th className="text-left py-3 px-4 font-semibold text-slate-600 text-xs">Status</th>
-                  <th className="text-right py-3 px-4 font-semibold text-slate-600 text-xs">Progress</th>
-                  <th className="text-right py-3 px-6 font-semibold text-slate-600 text-xs"></th>
+                <tr className="bg-[#002147]">
+                  <th className="text-left py-3 px-6 font-semibold text-white text-xs uppercase tracking-wider">Project</th>
+                  <th className="text-left py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Client</th>
+                  <th className="text-left py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Location</th>
+                  <th className="text-left py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Status</th>
+                  <th className="text-right py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Progress</th>
+                  <th className="text-right py-3 px-6 font-semibold text-white text-xs uppercase tracking-wider"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {recentEstimates.map((est) => {
-                  const statusStyle = STATUS_STYLES[est.status] ?? 'bg-slate-50 text-slate-500 border-slate-200';
+              <tbody className="divide-y divide-[#e2e8f0]">
+                {recentEstimates.map((est, idx) => {
+                  const statusStyle = STATUS_STYLES[est.status] ?? 'bg-slate-50 text-[#64748b] border-slate-200';
                   return (
-                    <tr key={est.estimate_id} className="hover:bg-slate-50/50 transition-colors">
+                    <tr key={est.estimate_id} className={idx % 2 === 1 ? 'bg-slate-50/50' : 'bg-white'}>
                       <td className="py-3 px-6">
-                        <p className="font-medium text-slate-800">
+                        <p className="font-medium text-[#1e293b]">
                           {est.project_name || est.estimate_id.slice(0, 12)}
                         </p>
                       </td>
-                      <td className="py-3 px-4 text-slate-500">
+                      <td className="py-3 px-4 text-[#64748b]">
                         {est.client_name || '--'}
                       </td>
-                      <td className="py-3 px-4 text-slate-500">
+                      <td className="py-3 px-4 text-[#64748b]">
                         {est.location ? (
                           <span className="flex items-center gap-1"><MapPin size={12} /> {est.location}</span>
                         ) : '--'}
                       </td>
                       <td className="py-3 px-4">
-                        <span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded border ${statusStyle}`}>
+                        <span className={`inline-block px-2 py-0.5 text-[11px] font-semibold rounded-md border ${statusStyle}`}>
                           {est.status.replace(/_/g, ' ')}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-right font-mono text-slate-600">
+                      <td className="py-3 px-4 text-right font-mono text-[#1e293b]">
                         {est.progress_pct !== undefined ? `${est.progress_pct}%` : '--'}
                       </td>
                       <td className="py-3 px-6 text-right">
                         <Link
                           href={`/estimate/${est.estimate_id}`}
-                          className="text-xs text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                          className="text-xs text-[#002147] hover:text-[#1e3a5f] font-medium transition-colors"
                         >
                           Open
                         </Link>
@@ -243,7 +216,7 @@ export default function Dashboard() {
 
       {/* SYNC FOOTER */}
       <div className="flex justify-center pb-4">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
+        <div className="flex items-center gap-2 text-xs text-[#64748b]">
           <Clock size={12} /> Last sync: {lastSyncTime || '...'}
         </div>
       </div>

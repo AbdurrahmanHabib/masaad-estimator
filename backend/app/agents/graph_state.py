@@ -42,7 +42,7 @@ class GraphState(TypedDict):
 
     # ── Commercial / financial ────────────────────────────────────────────────
     lme_aed_per_kg: float                  # From daily Celery Beat task
-    project_currency: str                  # "AED" default; "USD"/"EUR" for international
+    project_currency: str                  # Always "AED" — we always bill in AED
     is_international: bool                 # Triggers InternationalRoutingNode
 
     # ── Delta Engine ──────────────────────────────────────────────────────────
@@ -52,6 +52,9 @@ class GraphState(TypedDict):
     # ── Approval Gateway ──────────────────────────────────────────────────────
     approval_required: bool
     approved_by: Optional[str]             # user_id who signed off
+
+    # ── 41-Point Engineering Analysis ──────────────────────────────────────
+    engineering_results: Optional[dict]    # From EngineeringNode (wind/thermal/acoustic/deflection/glass)
 
     # ── Compliance Engineering (Phase 3B) ────────────────────────────────────
     compliance_report: Optional[dict]      # From ComplianceNode (C1+C2+C3)

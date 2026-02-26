@@ -266,6 +266,7 @@ async def _run_pipeline_inline(estimate_id: str, user_id: str):
                 "variation_order_delta": None,
                 "approval_required": True,
                 "approved_by": None,
+                "engineering_results": None,
                 "compliance_report": None,
                 "scurve_cashflow": None,
                 "milestone_schedule": None,
@@ -571,6 +572,7 @@ async def get_estimate(
         project_location = project.location_zone or ""
 
     bom = estimate.bom_output_json or {}
+    state_snap = estimate.state_snapshot or {}
 
     return {
         "estimate_id": str(estimate.id),
@@ -591,8 +593,9 @@ async def get_estimate(
             "line_items": bom.get("items", []),
             "financial_rates": bom.get("financial_rates", {}),
         },
-        "rfi_register": [],
-        "ve_opportunities": bom.get("ve_opportunities", []),
-        "structural_results": bom.get("structural_results", []),
+        "engineering_results": state_snap.get("engineering_results", {}),
+        "rfi_register": state_snap.get("rfi_log", []),
+        "ve_opportunities": state_snap.get("ve_suggestions", bom.get("ve_opportunities", [])),
+        "structural_results": state_snap.get("engineering_results", {}).get("deflection_checks", bom.get("structural_results", [])),
         "financial_summary": bom.get("summary", estimate.financial_json or {}),
     }

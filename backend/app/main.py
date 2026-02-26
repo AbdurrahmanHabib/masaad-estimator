@@ -240,6 +240,7 @@ from app.api.hrms_routes import router as hrms_router
 from app.api.triage_routes import router as triage_router
 from app.api.drafting_routes import router as drafting_router
 from app.api.commercial_routes import router as commercial_router
+from app.api.report_routes import router as report_router
 
 app.include_router(auth_router)
 app.include_router(settings_router)
@@ -249,16 +250,7 @@ app.include_router(hrms_router)
 app.include_router(triage_router)
 app.include_router(drafting_router)
 app.include_router(commercial_router)
-
-for module, name in [
-    ("app.api.report_routes", "report_router"),
-]:
-    try:
-        import importlib
-        mod = importlib.import_module(module)
-        app.include_router(getattr(mod, name))
-    except (ImportError, AttributeError):
-        pass
+app.include_router(report_router)
 
 
 @app.get("/health")
@@ -458,6 +450,10 @@ async def get_estimate_v1(estimate_id: str, request: Request):
                     "line_items": bom.get("items", []),
                     "financial_rates": bom.get("financial_rates", {}),
                 },
+                "engineering_results": state_snap.get("engineering_results", {}),
+                "rfi_register": state_snap.get("rfi_log", []),
+                "ve_opportunities": state_snap.get("ve_suggestions", []),
+                "structural_results": state_snap.get("engineering_results", {}).get("deflection_checks", []),
                 "financial_summary": bom.get("summary", estimate.financial_json or {}),
             }
     except HTTPException:

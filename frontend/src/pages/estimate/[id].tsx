@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import {
@@ -22,10 +22,13 @@ import {
   BarChart3,
   ShieldCheck,
   ListChecks,
+  Wrench,
+  Ruler,
+  Grid3X3,
 } from 'lucide-react';
 import { apiGet, apiPost, apiFetch } from '../../lib/api';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 interface SSEProgress {
   estimate_id: string;
@@ -63,6 +66,35 @@ interface FinancialSummary {
   attic_stock_cost_aed?: number;
   provisional_sums_aed?: number;
   retention_pct?: number;
+  factory_overhead_aed?: number;
+  project_management_aed?: number;
+  design_fee_aed?: number;
+  insurance_aed?: number;
+  warranty_aed?: number;
+  vat_aed?: number;
+  total_incl_vat_aed?: number;
+  [key: string]: unknown;
+}
+
+interface OpeningItem {
+  opening_id?: string;
+  id?: string;
+  mark_id?: string;
+  type?: string;
+  opening_type?: string;
+  width?: number;
+  width_mm?: number;
+  height?: number;
+  height_mm?: number;
+  area?: number;
+  area_sqm?: number;
+  glass_area?: number;
+  glass_area_sqm?: number;
+  system_type?: string;
+  system?: string;
+  quantity?: number;
+  qty?: number;
+  floor?: string | number;
   [key: string]: unknown;
 }
 
@@ -77,9 +109,10 @@ interface EstimateDetail {
   current_step?: string;
   reasoning_log: string[];
   project_scope: Record<string, unknown>;
-  opening_schedule: Record<string, unknown>;
+  opening_schedule: Record<string, unknown> | OpeningItem[];
   bom_output: {
     items?: BOMItem[];
+    summary?: Record<string, unknown>;
   };
   cutting_list: Record<string, unknown>;
   boq: {
@@ -119,20 +152,31 @@ interface EstimateDetail {
     system_type?: string;
     pass?: boolean;
     deflection_mm?: number;
+    wind_load_kpa?: number;
+    thermal_u_value?: number;
+    acoustic_rw?: number;
   }>;
   financial_summary: FinancialSummary;
+  engineering_results?: {
+    summary?: { total_checks: number; pass: number; fail: number; warning: number; compliance_pct: number };
+    wind_load_analysis?: Array<{ opening_id: string; check: string; wind_pressure_pa: number; safety_factor: number; status: string }>;
+    thermal_analysis?: Array<{ opening_id: string; u_value_w_m2k: number; target_u_value: number; status: string }>;
+    deflection_checks?: Array<{ opening_id: string; deflection_mm: number; allowable_mm: number; status: string }>;
+    glass_stress_checks?: Array<{ opening_id: string; applied_stress_mpa: number; allowable_stress_mpa: number; status: string }>;
+  };
+  state_snapshot?: Record<string, unknown>;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// Helpers
 
 const STATUS_STYLES: Record<string, string> = {
-  ESTIMATING: 'bg-blue-50 text-blue-700 border-blue-200',
+  ESTIMATING: 'bg-blue-50 text-[#002147] border-blue-200',
   REVIEW_REQUIRED: 'bg-amber-50 text-amber-700 border-amber-200',
-  APPROVED: 'bg-green-50 text-green-700 border-green-200',
+  APPROVED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   DISPATCHED: 'bg-purple-50 text-purple-700 border-purple-200',
-  Queued: 'bg-slate-50 text-slate-600 border-slate-200',
-  Processing: 'bg-blue-50 text-blue-700 border-blue-200',
-  Complete: 'bg-green-50 text-green-700 border-green-200',
+  Queued: 'bg-slate-50 text-[#64748b] border-slate-200',
+  Processing: 'bg-blue-50 text-[#002147] border-blue-200',
+  Complete: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   Error: 'bg-red-50 text-red-700 border-red-200',
 };
 
@@ -150,28 +194,43 @@ function fmtNum(value: number | undefined | null, decimals = 2): string {
   return value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-type TabKey = 'summary' | 'bom' | 'scope' | 'financial' | 'compliance';
+type TabKey = 'summary' | 'bom' | 'scope' | 'financial' | 'engineering' | 'compliance' | 'drawings';
 
-// ─── Progress Screen ──────────────────────────────────────────────────────────
+// Helper to normalize opening schedule data into an array
+function normalizeOpenings(raw: Record<string, unknown> | OpeningItem[] | undefined | null): OpeningItem[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  for (const key of ['openings', 'items', 'schedule', 'opening_schedule']) {
+    const val = raw[key];
+    if (Array.isArray(val)) return val;
+  }
+  const entries = Object.entries(raw);
+  if (entries.length > 0 && typeof entries[0][1] === 'object' && entries[0][1] !== null) {
+    return entries.map(([k, v]) => ({ opening_id: k, ...(v as Record<string, unknown>) }));
+  }
+  return [];
+}
+
+// Progress Screen
 
 function ProgressScreen({ progress, message }: { progress: number; message: string }) {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 p-20">
-      <div className="w-full max-w-md space-y-6 bg-white p-8 rounded-lg shadow-sm border border-slate-200">
+    <div className="flex-1 flex flex-col items-center justify-center bg-[#f8fafc] p-20">
+      <div className="w-full max-w-md space-y-6 bg-white p-8 rounded-md shadow-sm border border-[#e2e8f0]">
         <div className="flex justify-between items-end mb-2">
           <div className="flex flex-col">
-            <span className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Processing</span>
-            <h3 className="text-sm font-medium text-slate-700 mt-1 max-w-xs truncate">{message || 'Initializing...'}</h3>
+            <span className="text-[10px] font-semibold text-[#002147] uppercase tracking-wider">Processing</span>
+            <h3 className="text-sm font-medium text-[#1e293b] mt-1 max-w-xs truncate">{message || 'Initializing...'}</h3>
           </div>
-          <span className="text-lg font-mono font-bold text-blue-600">{progress}%</span>
+          <span className="text-lg font-mono font-bold text-[#002147]">{progress}%</span>
         </div>
         <div className="h-2 bg-slate-100 w-full rounded-full overflow-hidden">
           <div
-            className="h-full bg-blue-600 transition-all duration-700 rounded-full"
+            className="h-full bg-gradient-to-r from-[#002147] to-[#1e3a5f] transition-all duration-700 rounded-full"
             style={{ width: `${progress}%` }}
           />
         </div>
-        <div className="flex items-center gap-2 text-slate-400">
+        <div className="flex items-center gap-2 text-[#64748b]">
           <Loader2 size={14} className="animate-spin" />
           <p className="text-xs font-medium">Extracting geometry and specifications...</p>
         </div>
@@ -180,11 +239,11 @@ function ProgressScreen({ progress, message }: { progress: number; message: stri
   );
 }
 
-// ─── HITL Banner ──────────────────────────────────────────────────────────────
+// HITL Banner
 
 function HITLBanner({ triageId }: { triageId: string }) {
   return (
-    <div className="mx-4 mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between">
+    <div className="mx-4 mt-4 p-4 bg-amber-50 border border-amber-200 rounded-md flex items-center justify-between">
       <div className="flex items-center gap-3">
         <AlertTriangle size={16} className="text-amber-600" />
         <div>
@@ -194,7 +253,7 @@ function HITLBanner({ triageId }: { triageId: string }) {
       </div>
       <Link
         href="/triage"
-        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-xs font-semibold transition-colors"
+        className="px-4 py-2 bg-[#d97706] hover:bg-[#b45309] text-white rounded-md text-xs font-semibold transition-all"
       >
         Review Now
       </Link>
@@ -202,12 +261,23 @@ function HITLBanner({ triageId }: { triageId: string }) {
   );
 }
 
-// ─── BOM Table ────────────────────────────────────────────────────────────────
+// BOM Table with category grouping
 
 function BOMTable({ items }: { items: BOMItem[] }) {
   if (!items || items.length === 0) {
-    return <div className="text-center text-slate-400 py-16 text-sm">No BOM items generated yet.</div>;
+    return <div className="text-center text-[#64748b] py-16 text-sm">No BOM items generated yet.</div>;
   }
+
+  // Group by category
+  const grouped = useMemo(() => {
+    const map: Record<string, BOMItem[]> = {};
+    items.forEach((item) => {
+      const cat = (item.category || 'Uncategorised').toUpperCase();
+      if (!map[cat]) map[cat] = [];
+      map[cat].push(item);
+    });
+    return Object.entries(map);
+  }, [items]);
 
   const totalAED = items.reduce((sum, item) => sum + (item.subtotal_aed || 0), 0);
 
@@ -215,49 +285,61 @@ function BOMTable({ items }: { items: BOMItem[] }) {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-slate-50 border-b border-slate-200">
-            <th className="text-left py-3 px-4 font-semibold text-slate-600 text-xs w-12">#</th>
-            <th className="text-left py-3 px-4 font-semibold text-slate-600 text-xs">Item Code</th>
-            <th className="text-left py-3 px-4 font-semibold text-slate-600 text-xs">Description</th>
-            <th className="text-left py-3 px-4 font-semibold text-slate-600 text-xs">Category</th>
-            <th className="text-right py-3 px-4 font-semibold text-slate-600 text-xs">Qty</th>
-            <th className="text-right py-3 px-4 font-semibold text-slate-600 text-xs">Unit</th>
-            <th className="text-right py-3 px-4 font-semibold text-slate-600 text-xs">Rate (AED)</th>
-            <th className="text-right py-3 px-4 font-semibold text-slate-600 text-xs">Total (AED)</th>
+          <tr className="bg-[#002147]">
+            <th className="text-left py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider w-12">#</th>
+            <th className="text-left py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Item Code</th>
+            <th className="text-left py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Description</th>
+            <th className="text-right py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Qty</th>
+            <th className="text-right py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Unit</th>
+            <th className="text-right py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Rate (AED)</th>
+            <th className="text-right py-3 px-4 font-semibold text-white text-xs uppercase tracking-wider">Total (AED)</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100">
-          {items.map((item, i) => (
-            <tr key={i} className="hover:bg-slate-50/50 transition-colors">
-              <td className="py-3 px-4 text-slate-400 text-xs">{i + 1}</td>
-              <td className="py-3 px-4 text-slate-700 font-mono text-xs">{item.item_code || '--'}</td>
-              <td className="py-3 px-4 text-slate-800">{item.description || '--'}</td>
-              <td className="py-3 px-4">
-                {item.category ? (
-                  <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-xs">
-                    {item.category}
-                  </span>
-                ) : '--'}
-              </td>
-              <td className="py-3 px-4 text-right font-mono text-slate-700">
-                {fmtNum(item.quantity)}
-              </td>
-              <td className="py-3 px-4 text-right text-slate-500 text-xs">{item.unit || '--'}</td>
-              <td className="py-3 px-4 text-right font-mono text-slate-700">
-                {item.unit_rate?.toFixed(2) || 'TBD'}
-              </td>
-              <td className="py-3 px-4 text-right font-mono font-semibold text-slate-800">
-                {item.subtotal_aed?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'TBD'}
-              </td>
-            </tr>
-          ))}
+        <tbody>
+          {grouped.map(([category, catItems]) => {
+            const catTotal = catItems.reduce((s, i) => s + (i.subtotal_aed || 0), 0);
+            return (
+              <React.Fragment key={category}>
+                {/* Category header row */}
+                <tr className="bg-slate-100 border-y border-[#e2e8f0]">
+                  <td colSpan={7} className="py-2.5 px-4">
+                    <span className="text-xs font-bold text-[#002147] uppercase tracking-wide">{category}</span>
+                    <span className="text-xs text-[#64748b] ml-3 font-mono">{catItems.length} items</span>
+                  </td>
+                </tr>
+                {/* Items */}
+                {catItems.map((item, i) => (
+                  <tr key={`${category}-${i}`} className={`border-b border-[#e2e8f0] ${i % 2 === 1 ? 'bg-slate-50/50' : ''}`}>
+                    <td className="py-2.5 px-4 text-[#64748b] text-xs">{i + 1}</td>
+                    <td className="py-2.5 px-4 text-[#1e293b] font-mono text-xs">{item.item_code || '--'}</td>
+                    <td className="py-2.5 px-4 text-[#1e293b]">{item.description || '--'}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{fmtNum(item.quantity)}</td>
+                    <td className="py-2.5 px-4 text-right text-[#64748b] text-xs">{item.unit || '--'}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{item.unit_rate?.toFixed(2) || 'TBD'}</td>
+                    <td className="py-2.5 px-4 text-right font-mono font-semibold text-[#1e293b]">
+                      {item.subtotal_aed?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'TBD'}
+                    </td>
+                  </tr>
+                ))}
+                {/* Category subtotal */}
+                <tr className="bg-[#002147]/5 border-b border-[#e2e8f0]">
+                  <td colSpan={6} className="py-2.5 px-4 text-right text-xs font-semibold text-[#002147]">
+                    {category} Subtotal
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-mono font-bold text-[#002147] text-xs">
+                    {fmtAED(catTotal)}
+                  </td>
+                </tr>
+              </React.Fragment>
+            );
+          })}
         </tbody>
         <tfoot>
-          <tr className="bg-slate-50 border-t-2 border-slate-200">
-            <td colSpan={7} className="py-3 px-4 text-right font-semibold text-slate-700 text-sm">
-              BOM Total
+          <tr className="bg-[#002147]">
+            <td colSpan={6} className="py-3 px-4 text-right font-semibold text-white text-sm uppercase tracking-wider">
+              Grand Total
             </td>
-            <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 text-sm">
+            <td className="py-3 px-4 text-right font-mono font-bold text-white text-sm">
               {fmtAED(totalAED)}
             </td>
           </tr>
@@ -267,82 +349,529 @@ function BOMTable({ items }: { items: BOMItem[] }) {
   );
 }
 
-// ─── Scope Tab ────────────────────────────────────────────────────────────────
+// Openings Summary Section
 
-function ScopeTab({ scope, openings }: { scope: Record<string, unknown>; openings: Record<string, unknown> }) {
-  const scopeEntries = Object.entries(scope || {});
-  const openingEntries = Object.entries(openings || {});
+function OpeningsSummary({ openings }: { openings: OpeningItem[] }) {
+  if (!openings || openings.length === 0) return null;
 
-  if (scopeEntries.length === 0 && openingEntries.length === 0) {
-    return <div className="text-center text-slate-400 py-16 text-sm">No scope data available.</div>;
-  }
+  const totalArea = openings.reduce((sum, o) => {
+    const w = o.width ?? o.width_mm ?? 0;
+    const h = o.height ?? o.height_mm ?? 0;
+    const a = o.area ?? o.area_sqm ?? (w > 0 && h > 0 ? (w * h) / 1_000_000 : 0);
+    return sum + a;
+  }, 0);
+
+  const totalQty = openings.reduce((sum, o) => sum + (o.quantity ?? o.qty ?? 1), 0);
+
+  const byType: Record<string, number> = {};
+  openings.forEach((o) => {
+    const t = o.type || o.opening_type || 'Unknown';
+    byType[t] = (byType[t] || 0) + (o.quantity ?? o.qty ?? 1);
+  });
 
   return (
-    <div className="p-6 space-y-6">
-      {scopeEntries.length > 0 && (
+    <div className="bg-gradient-to-r from-[#002147] to-[#1e3a5f] rounded-md p-6 text-white">
+      <h3 className="text-xs font-semibold uppercase tracking-wider text-[#d4a017] mb-4">Openings Summary</h3>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div>
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">Project Scope</h3>
-          <div className="bg-slate-50 rounded-md border border-slate-200 p-4">
-            <pre className="text-xs text-slate-600 whitespace-pre-wrap font-mono">
-              {JSON.stringify(scope, null, 2)}
-            </pre>
-          </div>
+          <div className="text-[10px] text-white/60 font-medium">Total Facade Area</div>
+          <div className="text-xl font-bold font-mono">{fmtNum(totalArea, 1)} sqm</div>
         </div>
-      )}
-      {openingEntries.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">Opening Schedule</h3>
-          <div className="bg-slate-50 rounded-md border border-slate-200 p-4">
-            <pre className="text-xs text-slate-600 whitespace-pre-wrap font-mono">
-              {JSON.stringify(openings, null, 2)}
-            </pre>
+          <div className="text-[10px] text-white/60 font-medium">Total Openings</div>
+          <div className="text-xl font-bold font-mono">{totalQty}</div>
+        </div>
+        {Object.entries(byType).slice(0, 2).map(([type, count]) => (
+          <div key={type}>
+            <div className="text-[10px] text-white/60 font-medium">{type}</div>
+            <div className="text-xl font-bold font-mono">{count}</div>
           </div>
+        ))}
+      </div>
+      {Object.entries(byType).length > 2 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {Object.entries(byType).slice(2).map(([type, count]) => (
+            <span key={type} className="text-xs bg-white/10 rounded-md px-2 py-1">
+              {type}: {count}
+            </span>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// ─── Financial Tab ────────────────────────────────────────────────────────────
+// Opening Schedule Table
 
-function FinancialTab({ financial, boqSummary }: { financial: FinancialSummary; boqSummary?: EstimateDetail['boq']['summary'] }) {
-  const rows: [string, string][] = [];
+function OpeningScheduleTable({ openings }: { openings: OpeningItem[] }) {
+  if (!openings || openings.length === 0) return null;
 
-  if (financial.material_cost_aed !== undefined) rows.push(['Material Cost', fmtAED(financial.material_cost_aed)]);
-  if (financial.labor_cost_aed !== undefined) rows.push(['Labor Cost', fmtAED(financial.labor_cost_aed)]);
-  if (financial.overhead_aed !== undefined) rows.push(['Overhead', fmtAED(financial.overhead_aed)]);
-  if (financial.attic_stock_cost_aed !== undefined) rows.push(['Attic Stock (2%)', fmtAED(financial.attic_stock_cost_aed)]);
-  if (financial.provisional_sums_aed !== undefined) rows.push(['Provisional Sums', fmtAED(financial.provisional_sums_aed)]);
-  if (financial.margin_aed !== undefined) rows.push(['Margin', fmtAED(financial.margin_aed)]);
-  if (financial.gross_margin_pct !== undefined) rows.push(['Gross Margin', `${(financial.gross_margin_pct * 100).toFixed(1)}%`]);
+  const totalArea = openings.reduce((sum, o) => {
+    const w = o.width ?? o.width_mm ?? 0;
+    const h = o.height ?? o.height_mm ?? 0;
+    return sum + (o.area ?? o.area_sqm ?? (w > 0 && h > 0 ? (w * h) / 1_000_000 : 0));
+  }, 0);
 
-  if (boqSummary?.total_direct_cost_aed !== undefined) rows.push(['Total Direct Cost', fmtAED(boqSummary.total_direct_cost_aed)]);
-  if (boqSummary?.total_weight_kg !== undefined) rows.push(['Total Weight', `${fmtNum(boqSummary.total_weight_kg, 1)} kg`]);
+  const totalGlassArea = openings.reduce((sum, o) => sum + (o.glass_area ?? o.glass_area_sqm ?? 0), 0);
+  const totalQty = openings.reduce((sum, o) => sum + (o.quantity ?? o.qty ?? 1), 0);
+
+  return (
+    <div className="bg-white rounded-md border border-[#e2e8f0] overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-[#002147]">
+            <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Mark ID</th>
+            <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">System Type</th>
+            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Width (mm)</th>
+            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Height (mm)</th>
+            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Qty</th>
+            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Gross Area (sqm)</th>
+            <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Glass Area (sqm)</th>
+            <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Floor</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#e2e8f0]">
+          {openings.map((o, i) => {
+            const w = o.width ?? o.width_mm ?? 0;
+            const h = o.height ?? o.height_mm ?? 0;
+            const a = o.area ?? o.area_sqm ?? (w > 0 && h > 0 ? (w * h) / 1_000_000 : 0);
+            const q = o.quantity ?? o.qty ?? 1;
+            const ga = o.glass_area ?? o.glass_area_sqm ?? 0;
+            return (
+              <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
+                <td className="py-2 px-4 text-[#1e293b] font-mono text-xs">{o.mark_id || o.opening_id || o.id || `O-${String(i + 1).padStart(2, '0')}`}</td>
+                <td className="py-2 px-4 text-xs">
+                  {(o.system_type || o.system) ? (
+                    <span className="inline-block px-2 py-0.5 bg-blue-50 text-[#002147] rounded-md text-xs border border-blue-200">
+                      {o.system_type || o.system}
+                    </span>
+                  ) : (o.type || o.opening_type || '--')}
+                </td>
+                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{w > 0 ? fmtNum(w, 0) : '--'}</td>
+                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{h > 0 ? fmtNum(h, 0) : '--'}</td>
+                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{q}</td>
+                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{a > 0 ? fmtNum(a, 2) : '--'}</td>
+                <td className="py-2 px-4 text-right font-mono text-[#1e293b] text-xs">{ga > 0 ? fmtNum(ga, 2) : '--'}</td>
+                <td className="py-2 px-4 text-[#64748b] text-xs">{o.floor ?? '--'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="bg-slate-100 border-t-2 border-[#e2e8f0]">
+            <td colSpan={4} className="py-2.5 px-4 text-xs font-semibold text-[#002147]">
+              Total: {openings.length} openings
+            </td>
+            <td className="py-2.5 px-4 text-right font-mono font-bold text-[#002147] text-xs">
+              {totalQty}
+            </td>
+            <td className="py-2.5 px-4 text-right font-mono font-bold text-[#002147] text-xs">
+              {fmtNum(totalArea, 2)}
+            </td>
+            <td className="py-2.5 px-4 text-right font-mono font-bold text-[#002147] text-xs">
+              {totalGlassArea > 0 ? fmtNum(totalGlassArea, 2) : '--'}
+            </td>
+            <td className="py-2.5 px-4"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
+// Scope Tab with opening schedule table
+
+function ScopeTab({ scope, openings }: { scope: Record<string, unknown>; openings: Record<string, unknown> | OpeningItem[] }) {
+  const scopeEntries = Object.entries(scope || {});
+  const openingsList = normalizeOpenings(openings);
+
+  if (scopeEntries.length === 0 && openingsList.length === 0) {
+    return <div className="text-center text-[#64748b] py-16 text-sm">No scope data available.</div>;
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Project Scope key-value pairs */}
+      {scopeEntries.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-3">Project Scope</h3>
+          <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-[#e2e8f0]">
+                {scopeEntries.map(([key, value]) => (
+                  <tr key={key} className="hover:bg-slate-50/50">
+                    <td className="py-2.5 px-4 text-xs font-medium text-[#64748b] w-1/3 capitalize">
+                      {key.replace(/_/g, ' ')}
+                    </td>
+                    <td className="py-2.5 px-4 text-xs text-[#1e293b] font-mono">
+                      {typeof value === 'object' ? JSON.stringify(value) : String(value ?? '--')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Opening Schedule Table */}
+      {openingsList.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-3">Opening Schedule</h3>
+          <OpeningScheduleTable openings={openingsList} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Engineering Tab
+
+function EngineeringTab({
+  openings,
+  structural,
+  engineeringResults,
+  id,
+}: {
+  openings: OpeningItem[];
+  structural: EstimateDetail['structural_results'];
+  engineeringResults: EstimateDetail['engineering_results'];
+  id: string;
+}) {
+  const summary = engineeringResults?.summary;
+  const windLoadAnalysis = engineeringResults?.wind_load_analysis;
+  const thermalAnalysis = engineeringResults?.thermal_analysis;
+  const deflectionChecks = engineeringResults?.deflection_checks;
+  const glassStressChecks = engineeringResults?.glass_stress_checks;
+
+  const hasEngineeringData = summary || windLoadAnalysis?.length || thermalAnalysis?.length || deflectionChecks?.length || glassStressChecks?.length;
+
+  const statusBadge = (status: string) => {
+    const s = status?.toUpperCase();
+    if (s === 'PASS' || s === 'OK') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (s === 'FAIL') return 'bg-red-50 text-red-700 border-red-200';
+    if (s === 'WARNING' || s === 'WARN') return 'bg-amber-50 text-amber-700 border-amber-200';
+    return 'bg-slate-50 text-slate-600 border-slate-200';
+  };
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Engineering Summary */}
+      {summary && (
+        <div className="bg-gradient-to-r from-[#002147] to-[#1e3a5f] rounded-md p-6 text-white">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-[#d4a017] mb-4">Engineering Analysis Summary</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <div>
+              <div className="text-[10px] text-white/60 font-medium">Total Checks</div>
+              <div className="text-xl font-bold font-mono">{summary.total_checks}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-white/60 font-medium">Pass</div>
+              <div className="text-xl font-bold font-mono text-emerald-300">{summary.pass}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-white/60 font-medium">Fail</div>
+              <div className="text-xl font-bold font-mono text-red-300">{summary.fail}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-white/60 font-medium">Warning</div>
+              <div className="text-xl font-bold font-mono text-amber-300">{summary.warning}</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-white/60 font-medium">Compliance</div>
+              <div className="text-xl font-bold font-mono">{summary.compliance_pct?.toFixed(1)}%</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Opening Schedule */}
+      {openings.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-3">Opening Schedule</h3>
+          <OpeningScheduleTable openings={openings} />
+        </div>
+      )}
+
+      {/* Wind Load Analysis (engineering_results version) */}
+      {windLoadAnalysis && windLoadAnalysis.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-3">Wind Load Analysis</h3>
+          <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#002147]">
+                  <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Opening</th>
+                  <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Check</th>
+                  <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Wind Pressure (Pa)</th>
+                  <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Safety Factor</th>
+                  <th className="text-center py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#e2e8f0]">
+                {windLoadAnalysis.map((w, i) => (
+                  <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
+                    <td className="py-2.5 px-4 text-[#1e293b] font-mono text-xs">{w.opening_id}</td>
+                    <td className="py-2.5 px-4 text-[#1e293b] text-xs">{w.check}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{w.wind_pressure_pa?.toFixed(1) ?? '--'}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{w.safety_factor?.toFixed(2) ?? '--'}</td>
+                    <td className="py-2.5 px-4 text-center">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${statusBadge(w.status)}`}>
+                        {w.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Thermal Analysis (engineering_results version) */}
+      {thermalAnalysis && thermalAnalysis.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-3">Thermal Analysis</h3>
+          <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#002147]">
+                  <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Opening</th>
+                  <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">U-Value (W/m2K)</th>
+                  <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Target U-Value</th>
+                  <th className="text-center py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#e2e8f0]">
+                {thermalAnalysis.map((t, i) => (
+                  <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
+                    <td className="py-2.5 px-4 text-[#1e293b] font-mono text-xs">{t.opening_id}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{t.u_value_w_m2k?.toFixed(2) ?? '--'}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{t.target_u_value?.toFixed(2) ?? '--'}</td>
+                    <td className="py-2.5 px-4 text-center">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${statusBadge(t.status)}`}>
+                        {t.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Deflection Checks */}
+      {deflectionChecks && deflectionChecks.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-3">Deflection Checks</h3>
+          <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#002147]">
+                  <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Opening</th>
+                  <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Deflection (mm)</th>
+                  <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Allowable (mm)</th>
+                  <th className="text-center py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#e2e8f0]">
+                {deflectionChecks.map((d, i) => (
+                  <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
+                    <td className="py-2.5 px-4 text-[#1e293b] font-mono text-xs">{d.opening_id}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{d.deflection_mm?.toFixed(2) ?? '--'}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{d.allowable_mm?.toFixed(2) ?? '--'}</td>
+                    <td className="py-2.5 px-4 text-center">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${statusBadge(d.status)}`}>
+                        {d.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Glass Stress Checks */}
+      {glassStressChecks && glassStressChecks.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-3">Glass Stress Checks</h3>
+          <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#002147]">
+                  <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Opening</th>
+                  <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Applied (MPa)</th>
+                  <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Allowable (MPa)</th>
+                  <th className="text-center py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#e2e8f0]">
+                {glassStressChecks.map((g, i) => (
+                  <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
+                    <td className="py-2.5 px-4 text-[#1e293b] font-mono text-xs">{g.opening_id}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{g.applied_stress_mpa?.toFixed(2) ?? '--'}</td>
+                    <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{g.allowable_stress_mpa?.toFixed(2) ?? '--'}</td>
+                    <td className="py-2.5 px-4 text-center">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${statusBadge(g.status)}`}>
+                        {g.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback: legacy structural_results */}
+      {!hasEngineeringData && structural && structural.length > 0 && (
+        <>
+          <div>
+            <h3 className="text-sm font-semibold text-[#002147] mb-3">Wind Load Analysis</h3>
+            <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-[#002147]">
+                    <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">System Type</th>
+                    <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Wind Load (kPa)</th>
+                    <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Deflection (mm)</th>
+                    <th className="text-center py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#e2e8f0]">
+                  {structural.map((s, i) => (
+                    <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
+                      <td className="py-2.5 px-4 text-[#1e293b]">{s.system_type || `System ${i + 1}`}</td>
+                      <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{s.wind_load_kpa?.toFixed(2) ?? '--'}</td>
+                      <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{s.deflection_mm?.toFixed(2) ?? '--'}</td>
+                      <td className="py-2.5 px-4 text-center">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${s.pass ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                          {s.pass ? 'PASS' : 'FAIL'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {structural.some(s => s.thermal_u_value !== undefined) && (
+            <div>
+              <h3 className="text-sm font-semibold text-[#002147] mb-3">Thermal Performance</h3>
+              <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-[#002147]">
+                      <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">System Type</th>
+                      <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">U-Value (W/m2K)</th>
+                      <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Acoustic Rw (dB)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#e2e8f0]">
+                    {structural.filter(s => s.thermal_u_value !== undefined).map((s, i) => (
+                      <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
+                        <td className="py-2.5 px-4 text-[#1e293b]">{s.system_type || `System ${i + 1}`}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{s.thermal_u_value?.toFixed(2) ?? '--'}</td>
+                        <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{s.acoustic_rw ?? '--'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {(!hasEngineeringData && (!structural || structural.length === 0)) && openings.length === 0 && (
+        <div className="text-center text-[#64748b] py-16 text-sm">
+          <p>No engineering data available yet.</p>
+          <Link href={`/estimate/${id}/compliance`} className="text-[#002147] hover:underline text-xs mt-2 inline-block">
+            View full compliance report
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Financial Tab
+
+function FinancialTab({ financial, boqSummary, bomSummary }: { financial: FinancialSummary; boqSummary?: EstimateDetail['boq']['summary']; bomSummary?: Record<string, unknown> }) {
+  const rows: [string, string, string][] = [];
+
+  if (financial.material_cost_aed !== undefined) rows.push(['Material Cost', fmtAED(financial.material_cost_aed), 'text-[#1e293b]']);
+  if (financial.labor_cost_aed !== undefined) rows.push(['Labor Cost', fmtAED(financial.labor_cost_aed), 'text-[#1e293b]']);
+
+  // Factory overhead
+  const factoryOverhead = financial.factory_overhead_aed ?? 70000;
+  rows.push(['Factory Overhead (monthly)', fmtAED(factoryOverhead), 'text-[#1e293b]']);
+
+  if (financial.overhead_aed !== undefined) rows.push(['General Overhead', fmtAED(financial.overhead_aed), 'text-[#1e293b]']);
+
+  // Separate lines for project management, design, insurance, warranty
+  if (financial.project_management_aed !== undefined) rows.push(['Project Management', fmtAED(financial.project_management_aed), 'text-[#64748b]']);
+  if (financial.design_fee_aed !== undefined) rows.push(['Design Fee', fmtAED(financial.design_fee_aed), 'text-[#64748b]']);
+  if (financial.insurance_aed !== undefined) rows.push(['Insurance', fmtAED(financial.insurance_aed), 'text-[#64748b]']);
+  if (financial.warranty_aed !== undefined) rows.push(['Warranty Provision', fmtAED(financial.warranty_aed), 'text-[#64748b]']);
+
+  if (financial.attic_stock_cost_aed !== undefined) rows.push(['Attic Stock (2%)', fmtAED(financial.attic_stock_cost_aed), 'text-[#64748b]']);
+  if (financial.provisional_sums_aed !== undefined) rows.push(['Provisional Sums', fmtAED(financial.provisional_sums_aed), 'text-[#64748b]']);
+  if (financial.margin_aed !== undefined) rows.push(['Margin', fmtAED(financial.margin_aed), 'text-[#059669]']);
+  if (financial.gross_margin_pct !== undefined) rows.push(['Gross Margin', `${(financial.gross_margin_pct * 100).toFixed(1)}%`, 'text-[#059669]']);
+
+  if (boqSummary?.total_direct_cost_aed !== undefined) rows.push(['Total Direct Cost', fmtAED(boqSummary.total_direct_cost_aed), 'text-[#1e293b]']);
+  if (boqSummary?.total_weight_kg !== undefined) rows.push(['Total Weight', `${fmtNum(boqSummary.total_weight_kg, 1)} kg`, 'text-[#64748b]']);
 
   const totalAED = financial.total_aed ?? boqSummary?.total_sell_price_aed;
 
+  // VAT calculation
+  const vatAmount = financial.vat_aed ?? (totalAED ? totalAED * 0.05 : undefined);
+  const totalInclVat = financial.total_incl_vat_aed ?? (totalAED && vatAmount ? totalAED + vatAmount : undefined);
+
   if (rows.length === 0 && totalAED === undefined) {
-    return <div className="text-center text-slate-400 py-16 text-sm">No financial data available.</div>;
+    return <div className="text-center text-[#64748b] py-16 text-sm">No financial data available.</div>;
   }
 
   return (
     <div className="p-6">
       <div className="max-w-xl">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">Financial Breakdown</h3>
-        <div className="divide-y divide-slate-100">
-          {rows.map(([label, value]) => (
-            <div key={label} className="flex justify-between py-3 text-sm">
-              <span className="text-slate-500">{label}</span>
-              <span className="font-mono text-slate-800">{value}</span>
-            </div>
-          ))}
-        </div>
-        {totalAED !== undefined && (
-          <div className="flex justify-between py-4 mt-2 border-t-2 border-slate-300">
-            <span className="font-semibold text-slate-800">Total Contract Value</span>
-            <span className="font-mono font-bold text-lg text-slate-900">{fmtAED(totalAED)}</span>
+        <h3 className="text-sm font-semibold text-[#002147] mb-4">Financial Breakdown</h3>
+        <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+          <div className="divide-y divide-[#e2e8f0]">
+            {rows.map(([label, value, color]) => (
+              <div key={label} className="flex justify-between py-3 px-4 text-sm">
+                <span className="text-[#64748b]">{label}</span>
+                <span className={`font-mono font-medium ${color}`}>{value}</span>
+              </div>
+            ))}
           </div>
-        )}
+          {totalAED !== undefined && (
+            <>
+              <div className="flex justify-between py-3 px-4 border-t-2 border-[#002147] bg-slate-50">
+                <span className="font-semibold text-[#002147]">Subtotal (excl. VAT)</span>
+                <span className="font-mono font-bold text-lg text-[#002147]">{fmtAED(totalAED)}</span>
+              </div>
+              {vatAmount !== undefined && (
+                <div className="flex justify-between py-3 px-4 border-t border-[#e2e8f0]">
+                  <span className="text-[#64748b]">VAT (5%)</span>
+                  <span className="font-mono font-medium text-[#1e293b]">{fmtAED(vatAmount)}</span>
+                </div>
+              )}
+              {totalInclVat !== undefined && (
+                <div className="flex justify-between py-4 px-4 border-t-2 border-[#d4a017] bg-[#002147]">
+                  <span className="font-semibold text-white">Total (incl. VAT)</span>
+                  <span className="font-mono font-bold text-lg text-[#d4a017]">{fmtAED(totalInclVat)}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
         {financial.retention_pct !== undefined && (
           <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700">
             Note: {financial.retention_pct}% retention locked for 12 months (not included in cashflow).
@@ -353,14 +882,14 @@ function FinancialTab({ financial, boqSummary }: { financial: FinancialSummary; 
   );
 }
 
-// ─── Compliance Tab (inline summary) ─────────────────────────────────────────
+// Compliance Tab
 
 function ComplianceTab({ structural, id }: { structural: EstimateDetail['structural_results']; id: string }) {
   if (!structural || structural.length === 0) {
     return (
-      <div className="text-center text-slate-400 py-16 text-sm">
+      <div className="text-center text-[#64748b] py-16 text-sm">
         <p>No compliance data available.</p>
-        <Link href={`/estimate/${id}/compliance`} className="text-blue-600 hover:underline text-xs mt-2 inline-block">
+        <Link href={`/estimate/${id}/compliance`} className="text-[#002147] hover:underline text-xs mt-2 inline-block">
           View full compliance report
         </Link>
       </div>
@@ -370,38 +899,137 @@ function ComplianceTab({ structural, id }: { structural: EstimateDetail['structu
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-semibold text-slate-700">Structural Check Summary</h3>
-        <Link href={`/estimate/${id}/compliance`} className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+        <h3 className="text-sm font-semibold text-[#002147]">Structural Check Summary</h3>
+        <Link href={`/estimate/${id}/compliance`} className="text-xs text-[#002147] hover:underline flex items-center gap-1">
           Full Report <ChevronRight size={12} />
         </Link>
       </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-slate-50 border-b border-slate-200">
-            <th className="text-left py-2 px-4 font-semibold text-slate-600 text-xs">System Type</th>
-            <th className="text-right py-2 px-4 font-semibold text-slate-600 text-xs">Deflection (mm)</th>
-            <th className="text-center py-2 px-4 font-semibold text-slate-600 text-xs">Status</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {structural.map((s, i) => (
-            <tr key={i} className="hover:bg-slate-50/50">
-              <td className="py-2 px-4 text-slate-700">{s.system_type || `System ${i + 1}`}</td>
-              <td className="py-2 px-4 text-right font-mono text-slate-600">{s.deflection_mm?.toFixed(2) ?? '--'}</td>
-              <td className="py-2 px-4 text-center">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${s.pass ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
-                  {s.pass ? 'PASS' : 'FAIL'}
-                </span>
-              </td>
+      <div className="bg-white rounded-md border border-[#e2e8f0] overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-[#002147]">
+              <th className="text-left py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">System Type</th>
+              <th className="text-right py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Deflection (mm)</th>
+              <th className="text-center py-2.5 px-4 font-semibold text-white text-xs uppercase tracking-wider">Status</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-[#e2e8f0]">
+            {structural.map((s, i) => (
+              <tr key={i} className={i % 2 === 1 ? 'bg-slate-50/50' : ''}>
+                <td className="py-2.5 px-4 text-[#1e293b]">{s.system_type || `System ${i + 1}`}</td>
+                <td className="py-2.5 px-4 text-right font-mono text-[#1e293b]">{s.deflection_mm?.toFixed(2) ?? '--'}</td>
+                <td className="py-2.5 px-4 text-center">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${s.pass ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                    {s.pass ? 'PASS' : 'FAIL'}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// Drawings Tab
+
+function DrawingsTab({ estimateId }: { estimateId: string }) {
+  const [drawings, setDrawings] = React.useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [generating, setGenerating] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const fetchDrawings = async () => {
+      setLoading(true);
+      try {
+        const data = await apiGet<Record<string, unknown>>(`/api/reports/estimate/${estimateId}/drawings`);
+        setDrawings(data);
+      } catch {
+        // Non-fatal: drawings endpoint may not be available yet
+      }
+      setLoading(false);
+    };
+    fetchDrawings();
+  }, [estimateId]);
+
+  const handleDownload = async (drawingType: string) => {
+    setGenerating(drawingType);
+    try {
+      const response = await apiFetch(`/api/reports/estimate/${estimateId}/drawing/${drawingType}`);
+      if (!response.ok) throw new Error('Download failed');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${drawingType}_${estimateId.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(`Failed: ${e}`);
+    }
+    setGenerating(null);
+  };
+
+  const DRAWING_TYPES = [
+    { key: 'elevation', name: 'Elevation Markup', desc: 'Facade elevation with all openings tagged by Mark ID', Icon: Ruler },
+    { key: 'shop_drawing', name: 'Shop Drawings', desc: 'Cross-section details for each system type (Curtain Wall, Shopfront, etc.)', Icon: Layers },
+    { key: 'acp_layout', name: 'ACP Panel Layouts', desc: 'Flat-sheet routing & folding dimensions for ACP panels', Icon: Grid3X3 },
+  ];
+
+  if (loading) {
+    return (
+      <div className="p-6 flex justify-center">
+        <Loader2 size={24} className="animate-spin text-slate-300" />
+      </div>
+    );
+  }
+
+  const drawingsData = drawings as Record<string, unknown> | null;
+  const drawingsList = (drawingsData?.drawings ?? []) as unknown[];
+
+  return (
+    <div className="p-6">
+      <h3 className="text-sm font-semibold text-[#002147] mb-4">Drawings &amp; Shop Details</h3>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {DRAWING_TYPES.map(dt => (
+          <div key={dt.key} className="bg-white border border-slate-200 rounded-lg p-5 flex flex-col justify-between">
+            <div>
+              <div className="mb-2 text-[#002147]">
+                <dt.Icon size={28} />
+              </div>
+              <h4 className="text-sm font-semibold text-[#002147] mb-1">{dt.name}</h4>
+              <p className="text-xs text-slate-500 mb-4">{dt.desc}</p>
+            </div>
+            <button
+              onClick={() => handleDownload(dt.key)}
+              disabled={generating === dt.key}
+              className="w-full px-4 py-2 bg-[#002147] hover:bg-[#1e3a5f] text-white rounded-md text-xs font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {generating === dt.key ? (
+                <><Loader2 size={14} className="animate-spin" /> Generating...</>
+              ) : (
+                <><Download size={14} /> Download PDF</>
+              )}
+            </button>
+          </div>
+        ))}
+      </div>
+      {drawingsList.length > 0 && (
+        <div className="mt-4 text-xs text-slate-400">
+          {String((drawingsData as Record<string, unknown>)?.drawing_count ?? drawingsList.length)} drawings generated
+          {(drawingsData as Record<string, unknown>)?.generated_at
+            ? ` at ${new Date(String((drawingsData as Record<string, unknown>).generated_at)).toLocaleString()}`
+            : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Main Component
 
 const EstimatePage = () => {
   const router = useRouter();
@@ -517,18 +1145,18 @@ const EstimatePage = () => {
 
   const handlePrint = () => { window.print(); };
 
-  if (!mounted) return <div className="min-h-screen bg-slate-50" />;
+  if (!mounted) return <div className="min-h-screen bg-[#f8fafc]" />;
 
   if (error) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-4">
           <AlertTriangle size={40} className="mx-auto text-red-400" />
-          <p className="text-slate-700 font-semibold">Failed to load estimate</p>
+          <p className="text-[#1e293b] font-semibold">Failed to load estimate</p>
           <p className="text-xs text-red-500 max-w-md">{error}</p>
           <button
             onClick={() => router.push('/')}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+            className="px-4 py-2 bg-[#002147] hover:bg-[#1e3a5f] text-white rounded-md text-sm font-medium transition-all"
           >
             Back to Dashboard
           </button>
@@ -556,7 +1184,7 @@ const EstimatePage = () => {
     return <ProgressScreen progress={pct} message={msg} />;
   }
 
-  // ─── Data extraction ──────────────────────────────────────────────────────
+  // Data extraction
 
   const bomItems: BOMItem[] = estimate.bom_output?.items ?? [];
   const boqItems = estimate.boq?.line_items ?? [];
@@ -565,6 +1193,9 @@ const EstimatePage = () => {
   const financial = estimate.financial_summary || {};
   const rfiCount = estimate.rfi_register?.length ?? 0;
   const veTotal = estimate.ve_opportunities?.reduce((s, v) => s + (v.saving_aed || 0), 0) ?? 0;
+  const openingsList = normalizeOpenings(estimate.opening_schedule);
+  const engineeringResults = estimate.engineering_results ||
+    (estimate.state_snapshot?.engineering_results as EstimateDetail['engineering_results']) || undefined;
 
   // Use BOM items if available, fall back to BOQ line items
   const displayBomItems: BOMItem[] = bomItems.length > 0
@@ -584,43 +1215,45 @@ const EstimatePage = () => {
   const TABS: { key: TabKey; label: string; icon: React.ElementType; count?: number }[] = [
     { key: 'summary', label: 'Summary', icon: ClipboardList },
     { key: 'bom', label: 'BOM', icon: Package, count: displayBomItems.length },
-    { key: 'scope', label: 'Scope', icon: ListChecks },
+    { key: 'scope', label: 'Scope', icon: ListChecks, count: openingsList.length > 0 ? openingsList.length : undefined },
     { key: 'financial', label: 'Financial', icon: BarChart3 },
+    { key: 'engineering', label: 'Engineering', icon: Wrench },
     { key: 'compliance', label: 'Compliance', icon: ShieldCheck },
+    { key: 'drawings', label: 'Drawings', icon: Ruler },
   ];
 
   return (
     <div className="flex flex-col gap-0 print:gap-0">
 
-      {/* ── PROJECT HEADER ──────────────────────────────────────────────────── */}
+      {/* PROJECT HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 print:mb-4">
         <div className="flex items-start gap-4">
           <button onClick={() => router.push('/')} className="mt-1 p-1.5 hover:bg-slate-100 rounded-md transition-colors print:hidden">
-            <ArrowLeft size={18} className="text-slate-400" />
+            <ArrowLeft size={18} className="text-[#64748b]" />
           </button>
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-xl font-bold text-slate-800">
+              <h1 className="text-xl font-bold text-[#002147]">
                 {estimate.project_name || `Estimate #${(estimate.estimate_id || '').slice(0, 8)}`}
               </h1>
-              <span className={`px-2.5 py-0.5 text-[11px] font-semibold rounded border ${STATUS_STYLES[currentStatus] || STATUS_STYLES['Queued']}`}>
+              <span className={`px-2.5 py-0.5 text-[11px] font-semibold rounded-md border ${STATUS_STYLES[currentStatus] || STATUS_STYLES['Queued']}`}>
                 {currentStatus.replace(/_/g, ' ')}
               </span>
             </div>
-            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-[#64748b]">
               {estimate.client_name && (
                 <>
                   <span className="flex items-center gap-1"><Briefcase size={12} /> {estimate.client_name}</span>
-                  <span className="w-1 h-1 bg-slate-300 rounded-full" />
+                  <span className="w-1 h-1 bg-[#e2e8f0] rounded-full" />
                 </>
               )}
               <span className="flex items-center gap-1"><MapPin size={12} /> {estimate.location || 'UAE'}</span>
-              <span className="w-1 h-1 bg-slate-300 rounded-full" />
+              <span className="w-1 h-1 bg-[#e2e8f0] rounded-full" />
               <span className="flex items-center gap-1"><Clock size={12} /> ID: {(estimate.estimate_id || '').slice(0, 12)}</span>
               {financialRates?.lme_aluminum_usd_mt && (
                 <>
-                  <span className="w-1 h-1 bg-slate-300 rounded-full" />
-                  <span className="font-mono text-slate-600">LME: ${financialRates.lme_aluminum_usd_mt.toFixed(0)}/MT</span>
+                  <span className="w-1 h-1 bg-[#e2e8f0] rounded-full" />
+                  <span className="font-mono text-[#1e293b]">LME: ${financialRates.lme_aluminum_usd_mt.toFixed(0)}/MT</span>
                 </>
               )}
             </div>
@@ -631,21 +1264,21 @@ const EstimatePage = () => {
           <button
             onClick={handleDownloadPDF}
             disabled={downloading}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium transition-colors flex items-center gap-2 disabled:opacity-50"
+            className="px-4 py-2 bg-[#002147] hover:bg-[#1e3a5f] text-white rounded-md text-xs font-medium transition-all flex items-center gap-2 disabled:opacity-50"
           >
             {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
             Download PDF
           </button>
           <button
             onClick={handlePrint}
-            className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-md text-xs font-medium transition-colors flex items-center gap-2"
+            className="px-4 py-2 border border-[#e2e8f0] hover:bg-slate-50 text-[#1e293b] rounded-md text-xs font-medium transition-colors flex items-center gap-2"
           >
             <Printer size={14} /> Print
           </button>
           {currentStatus === 'REVIEW_REQUIRED' && (
             <Link
               href={`/estimate/${id}/approve`}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-md text-xs font-medium transition-colors flex items-center gap-2"
+              className="px-4 py-2 bg-[#d4a017] hover:bg-[#b8900f] text-[#002147] rounded-md text-xs font-semibold transition-all flex items-center gap-2"
             >
               <ShieldAlert size={14} /> Approve
             </Link>
@@ -653,14 +1286,14 @@ const EstimatePage = () => {
         </div>
       </div>
 
-      {/* ── METRICS ROW ──────────────────────────────────────────────────────── */}
+      {/* METRICS ROW */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 print:grid-cols-4">
         {[
           {
             label: 'Contract Value',
             value: totalContractValue ? fmtAED(totalContractValue) : '--',
             icon: DollarSign,
-            iconColor: 'text-blue-600',
+            borderColor: 'border-l-[#3b82f6]',
           },
           {
             label: 'Gross Margin',
@@ -668,49 +1301,49 @@ const EstimatePage = () => {
               ? `${((financial.gross_margin_pct ?? boqSummary?.gross_margin_pct ?? 0) * 100).toFixed(1)}%`
               : '--',
             icon: TrendingUp,
-            iconColor: 'text-green-600',
+            borderColor: 'border-l-[#059669]',
           },
           {
             label: 'BOM Items',
             value: String(displayBomItems.length),
             icon: Layers,
-            iconColor: 'text-slate-600',
+            borderColor: 'border-l-[#002147]',
           },
           {
             label: 'Open RFIs',
             value: String(rfiCount),
             icon: FileText,
-            iconColor: 'text-amber-600',
+            borderColor: 'border-l-[#d97706]',
           },
         ].map((m) => (
-          <div key={m.label} className="bg-white rounded-lg border border-slate-200 p-4 flex items-center gap-3">
-            <m.icon size={18} className={m.iconColor} />
+          <div key={m.label} className={`bg-white rounded-md border border-[#e2e8f0] border-l-4 ${m.borderColor} p-4 flex items-center gap-3 shadow-sm`}>
+            <m.icon size={18} className="text-[#64748b]" />
             <div>
-              <div className="text-[11px] text-slate-500">{m.label}</div>
-              <div className="text-base font-semibold text-slate-800 font-mono">{m.value}</div>
+              <div className="text-[11px] text-[#64748b]">{m.label}</div>
+              <div className="text-base font-semibold text-[#1e293b] font-mono">{m.value}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* ── TABS ─────────────────────────────────────────────────────────────── */}
-      <div className="bg-white rounded-lg border border-slate-200 flex-1 print:border-0 print:shadow-none">
+      {/* TABS */}
+      <div className="bg-white rounded-md border border-[#e2e8f0] flex-1 print:border-0 print:shadow-none shadow-sm">
         {/* Tab bar */}
-        <div className="flex border-b border-slate-200 px-4 overflow-x-auto print:hidden">
+        <div className="flex border-b border-[#e2e8f0] px-4 overflow-x-auto print:hidden">
           {TABS.map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab.key
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                  ? 'border-[#d4a017] text-[#002147]'
+                  : 'border-transparent text-[#64748b] hover:text-[#1e293b] hover:border-[#e2e8f0]'
               }`}
             >
               <tab.icon size={15} />
               {tab.label}
               {tab.count !== undefined && tab.count > 0 && (
-                <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-full font-mono">{tab.count}</span>
+                <span className="text-[11px] bg-slate-100 text-[#1e293b] px-1.5 py-0.5 rounded-md font-mono">{tab.count}</span>
               )}
             </button>
           ))}
@@ -721,6 +1354,9 @@ const EstimatePage = () => {
           {/* SUMMARY TAB */}
           {activeTab === 'summary' && (
             <div className="p-6 space-y-6">
+              {/* Openings Summary banner */}
+              <OpeningsSummary openings={openingsList} />
+
               {/* Quick links */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
@@ -732,28 +1368,28 @@ const EstimatePage = () => {
                   <Link
                     key={a.href}
                     href={a.href}
-                    className="flex items-center gap-3 p-3 rounded-md border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition-colors text-sm text-slate-700"
+                    className="flex items-center gap-3 p-3 rounded-md border border-[#e2e8f0] hover:bg-slate-50 hover:border-slate-300 transition-all text-sm text-[#1e293b]"
                   >
-                    <a.icon size={16} className="text-slate-400 shrink-0" />
+                    <a.icon size={16} className="text-[#64748b] shrink-0" />
                     <span className="flex-1">{a.label}</span>
                     {a.badge !== undefined && (
-                      <span className="text-xs bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded border border-amber-200">{a.badge}</span>
+                      <span className="text-xs bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded-md border border-amber-200">{a.badge}</span>
                     )}
-                    <ChevronRight size={14} className="text-slate-300" />
+                    <ChevronRight size={14} className="text-[#e2e8f0]" />
                   </Link>
                 ))}
               </div>
 
               {/* Reasoning log */}
               <div>
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">Reasoning Log</h3>
+                <h3 className="text-sm font-semibold text-[#002147] mb-3">Reasoning Log</h3>
                 {estimate.reasoning_log.length === 0 ? (
-                  <p className="text-sm text-slate-400">No log entries.</p>
+                  <p className="text-sm text-[#64748b]">No log entries.</p>
                 ) : (
-                  <div className="bg-slate-50 rounded-md border border-slate-200 p-4 max-h-80 overflow-y-auto">
+                  <div className="bg-slate-50 rounded-md border border-[#e2e8f0] p-4 max-h-80 overflow-y-auto">
                     {estimate.reasoning_log.map((entry, i) => (
-                      <div key={i} className="text-xs text-slate-600 py-1.5 border-b border-slate-100 last:border-0 font-mono">
-                        <span className="text-slate-400 mr-3 select-none">{String(i + 1).padStart(3, '0')}</span>
+                      <div key={i} className="text-xs text-[#1e293b] py-1.5 border-b border-[#e2e8f0] last:border-0 font-mono">
+                        <span className="text-[#64748b] mr-3 select-none">{String(i + 1).padStart(3, '0')}</span>
                         {entry}
                       </div>
                     ))}
@@ -765,20 +1401,20 @@ const EstimatePage = () => {
               {estimate.ve_opportunities.length > 0 && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold text-slate-700">VE Opportunities</h3>
-                    <span className="text-xs font-mono text-green-600">Potential: {fmtAED(veTotal)}</span>
+                    <h3 className="text-sm font-semibold text-[#002147]">VE Opportunities</h3>
+                    <span className="text-xs font-mono text-[#059669]">Potential: {fmtAED(veTotal)}</span>
                   </div>
                   <div className="space-y-2">
                     {estimate.ve_opportunities.slice(0, 5).map((ve, i) => (
-                      <div key={i} className="flex items-center justify-between text-sm p-2 bg-slate-50 rounded border border-slate-100">
-                        <span className="text-slate-600 truncate flex-1">{ve.description || ve.item_code}</span>
-                        <span className="font-mono text-green-600 text-xs ml-4 shrink-0">
+                      <div key={i} className="flex items-center justify-between text-sm p-3 bg-slate-50 rounded-md border border-[#e2e8f0]">
+                        <span className="text-[#1e293b] truncate flex-1">{ve.description || ve.item_code}</span>
+                        <span className="font-mono text-[#059669] text-xs ml-4 shrink-0">
                           -{(ve.saving_aed || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} AED
                         </span>
                       </div>
                     ))}
                     {estimate.ve_opportunities.length > 5 && (
-                      <Link href={`/estimate/${id}/ve-menu`} className="text-xs text-blue-600 hover:underline">
+                      <Link href={`/estimate/${id}/ve-menu`} className="text-xs text-[#002147] hover:underline">
                         +{estimate.ve_opportunities.length - 5} more opportunities
                       </Link>
                     )}
@@ -795,35 +1431,43 @@ const EstimatePage = () => {
           {activeTab === 'scope' && <ScopeTab scope={estimate.project_scope} openings={estimate.opening_schedule} />}
 
           {/* FINANCIAL TAB */}
-          {activeTab === 'financial' && <FinancialTab financial={financial} boqSummary={boqSummary} />}
+          {activeTab === 'financial' && <FinancialTab financial={financial} boqSummary={boqSummary} bomSummary={estimate.bom_output?.summary} />}
+
+          {/* ENGINEERING TAB */}
+          {activeTab === 'engineering' && <EngineeringTab openings={openingsList} structural={estimate.structural_results} engineeringResults={engineeringResults} id={id as string} />}
 
           {/* COMPLIANCE TAB */}
           {activeTab === 'compliance' && <ComplianceTab structural={estimate.structural_results} id={id as string} />}
+
+          {/* DRAWINGS TAB */}
+          {activeTab === 'drawings' && (
+            <DrawingsTab estimateId={id as string} />
+          )}
         </div>
       </div>
 
-      {/* ── FINANCIAL SUMMARY FOOTER ──────────────────────────────────────── */}
+      {/* FINANCIAL SUMMARY FOOTER */}
       {totalContractValue !== undefined && (
-        <div className="mt-4 bg-white rounded-lg border border-slate-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:mt-2">
+        <div className="mt-4 bg-white rounded-md border border-[#e2e8f0] p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 print:mt-2 shadow-sm">
           <div className="flex flex-wrap gap-6 text-sm">
             <div>
-              <span className="text-slate-500">Material</span>
-              <span className="ml-2 font-mono font-medium text-slate-800">{fmtAED(financial.material_cost_aed)}</span>
+              <span className="text-[#64748b]">Material</span>
+              <span className="ml-2 font-mono font-medium text-[#1e293b]">{fmtAED(financial.material_cost_aed)}</span>
             </div>
             <div>
-              <span className="text-slate-500">Labor</span>
-              <span className="ml-2 font-mono font-medium text-slate-800">{fmtAED(financial.labor_cost_aed)}</span>
+              <span className="text-[#64748b]">Labor</span>
+              <span className="ml-2 font-mono font-medium text-[#1e293b]">{fmtAED(financial.labor_cost_aed)}</span>
             </div>
             {financial.gross_margin_pct !== undefined && (
               <div>
-                <span className="text-slate-500">Margin</span>
-                <span className="ml-2 font-mono font-medium text-slate-800">{(financial.gross_margin_pct * 100).toFixed(1)}%</span>
+                <span className="text-[#64748b]">Margin</span>
+                <span className="ml-2 font-mono font-medium text-[#059669]">{(financial.gross_margin_pct * 100).toFixed(1)}%</span>
               </div>
             )}
           </div>
           <div className="text-right">
-            <span className="text-xs text-slate-500 mr-3">Total Contract Value</span>
-            <span className="text-lg font-bold font-mono text-slate-900">{fmtAED(totalContractValue)}</span>
+            <span className="text-xs text-[#64748b] mr-3">Total Contract Value</span>
+            <span className="text-lg font-bold font-mono text-[#002147]">{fmtAED(totalContractValue)}</span>
           </div>
         </div>
       )}

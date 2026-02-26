@@ -9,11 +9,12 @@ import {
   Search,
   Bell,
   ChevronRight,
-  ArrowLeft,
   LogOut,
   ChevronLeft,
   Menu,
-  Loader2
+  Loader2,
+  Archive,
+  X,
 } from 'lucide-react';
 import { useAuthStore } from '../store/useAuthStore';
 import { apiGet } from '../lib/api';
@@ -29,6 +30,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const [mounted, setMounted] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [pathParts, setPathParts] = useState<string[]>([]);
 
   const [lmePrice, setLmePrice] = useState<string | null>(null);
@@ -39,7 +41,6 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     setPathParts(router.asPath.split('/').filter(p => p));
   }, [router.asPath]);
 
-  // Fetch live LME price on mount (skip /api/settings to avoid 404)
   useEffect(() => {
     const fetchLiveRates = async () => {
       setLmeLoading(true);
@@ -57,7 +58,7 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           );
         }
       } catch {
-        // Non-fatal -- keep null, UI will show fallback
+        // Non-fatal
       } finally {
         setLmeLoading(false);
       }
@@ -66,6 +67,11 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
     fetchLiveRates();
   }, []);
 
+  // Close mobile sidebar on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [router.asPath]);
+
   const handleLogout = () => {
     logout();
     router.replace('/login');
@@ -73,93 +79,142 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const navItems = [
     { name: 'Dashboard', icon: LayoutDashboard, href: '/' },
-    { name: 'Ingestion', icon: Database, href: '/estimate/new' },
-    { name: 'Reports', icon: BarChart3, href: '/reports' },
-    { name: 'Triage', icon: Bell, href: '/triage' },
+    { name: 'New Estimate', icon: Database, href: '/estimate/new' },
+    { name: 'Triage Queue', icon: Bell, href: '/triage' },
     { name: 'Settings', icon: Settings, href: '/settings' },
+    { name: 'Archive', icon: Archive, href: '/archive' },
   ];
 
   const avatarLetter = user?.full_name?.charAt(0)?.toUpperCase() ?? 'U';
   const displayName = user?.full_name ?? user?.email ?? 'Unknown User';
-  const displayRole = user?.role ?? 'User';
+  const displayRole = user?.role ?? 'Estimator';
 
   if (!mounted) return <div className="min-h-screen bg-[#f8fafc]" />;
 
-  return (
-    <div className="flex h-screen bg-[#f8fafc] text-slate-700 font-sans overflow-hidden">
-      {/* SIDEBAR */}
-      <div className={`${collapsed ? 'w-16' : 'w-60'} bg-slate-900 flex flex-col transition-all duration-200 z-50 print:hidden`}>
-        <div className="p-4 flex items-center gap-3 border-b border-slate-800">
-          <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain shrink-0" />
-          {!collapsed && (
-            <div className="flex flex-col min-w-0">
-              <h1 className="text-sm font-bold text-white leading-tight truncate">Madinat Al Saada</h1>
-              <p className="text-[10px] text-slate-400 font-medium">Estimator</p>
+  const sidebarContent = (
+    <>
+      {/* Company branding */}
+      <div className="px-4 py-5 flex items-center gap-3 border-b border-white/10">
+        <div className="w-9 h-9 rounded-md bg-[#d4a017] flex items-center justify-center text-[#002147] font-bold text-sm shrink-0">
+          M
+        </div>
+        {(!collapsed || mobileOpen) && (
+          <div className="flex flex-col min-w-0">
+            <h1 className="text-[13px] font-bold text-[#d4a017] leading-tight tracking-wide">MASAAD</h1>
+            <p className="text-[10px] text-white/70 font-medium leading-tight">Aluminium & Glass Works</p>
+          </div>
+        )}
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 px-3 py-5 space-y-0.5 overflow-y-auto">
+        {navItems.map((item) => {
+          const isActive = router.pathname === item.href ||
+            (item.href !== '/' && router.pathname.startsWith(item.href));
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-[13px] font-medium transition-all ${
+                isActive
+                  ? 'bg-[#1e3a5f] text-white border-l-[3px] border-[#d4a017]'
+                  : 'text-white/60 hover:bg-[#1e3a5f]/50 hover:text-white border-l-[3px] border-transparent'
+              }`}
+            >
+              <item.icon size={18} className={isActive ? 'text-[#d4a017]' : 'text-white/50'} />
+              {(!collapsed || mobileOpen) && <span>{item.name}</span>}
+            </Link>
+          );
+        })}
+      </nav>
+
+      {/* User panel at bottom */}
+      <div className="p-3 border-t border-white/10">
+        <div className="flex items-center gap-3 px-2 py-2">
+          <div className="w-8 h-8 bg-[#1e3a5f] rounded-md flex items-center justify-center text-[#d4a017] text-xs font-bold shrink-0 border border-[#d4a017]/30">
+            {avatarLetter}
+          </div>
+          {(!collapsed || mobileOpen) && (
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-white truncate">{displayName}</p>
+              <p className="text-[10px] text-white/50 truncate">{displayRole}</p>
             </div>
           )}
+          {(!collapsed || mobileOpen) && (
+            <button
+              onClick={handleLogout}
+              title="Log out"
+              className="text-white/40 hover:text-red-400 transition-colors p-1"
+            >
+              <LogOut size={14} />
+            </button>
+          )}
         </div>
+      </div>
+    </>
+  );
 
-        <nav className="flex-1 px-3 py-6 space-y-1">
-          {navItems.map((item) => {
-            const isActive = router.pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
-                }`}
-              >
-                <item.icon size={18} className={isActive ? 'text-white' : 'text-slate-500'} />
-                {!collapsed && <span>{item.name}</span>}
-              </Link>
-            );
-          })}
-        </nav>
+  return (
+    <div className="flex h-screen bg-[#f8fafc] text-[#1e293b] font-sans overflow-hidden">
+      {/* MOBILE OVERLAY */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
 
-        {/* User panel */}
-        <div className="p-3 border-t border-slate-800">
-          <div className="flex items-center gap-3 p-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0">
-              {avatarLetter}
-            </div>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-white truncate">{displayName}</p>
-                <p className="text-[10px] text-slate-500 truncate">{displayRole}</p>
-              </div>
-            )}
-            {!collapsed && (
-              <button
-                onClick={handleLogout}
-                title="Log out"
-                className="text-slate-500 hover:text-red-400 transition-colors"
-              >
-                <LogOut size={14} />
-              </button>
-            )}
-          </div>
+      {/* MOBILE SIDEBAR */}
+      <div
+        className={`fixed inset-y-0 left-0 w-[240px] bg-[#002147] flex flex-col z-50 transform transition-transform duration-200 lg:hidden ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="absolute top-3 right-3">
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="p-1 text-white/60 hover:text-white transition-colors"
+          >
+            <X size={18} />
+          </button>
         </div>
+        {sidebarContent}
+      </div>
+
+      {/* DESKTOP SIDEBAR */}
+      <div
+        className={`${collapsed ? 'w-[68px]' : 'w-[240px]'} bg-[#002147] hidden lg:flex flex-col transition-all duration-200 z-50 print:hidden`}
+      >
+        {sidebarContent}
       </div>
 
       {/* MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* TOP HEADER */}
-        <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 z-40 print:hidden">
+        {/* TOP HEADER BAR */}
+        <header className="h-14 bg-white border-b border-[#e2e8f0] flex items-center justify-between px-6 z-30 print:hidden shadow-sm">
           <div className="flex items-center gap-4 flex-1">
-            <button onClick={() => setCollapsed(!collapsed)} className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-400">
+            {/* Mobile hamburger */}
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-[#64748b] lg:hidden"
+            >
+              <Menu size={18} />
+            </button>
+            {/* Desktop collapse */}
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-[#64748b] hidden lg:block"
+            >
               {collapsed ? <Menu size={18} /> : <ChevronLeft size={18} />}
             </button>
 
             {/* Breadcrumb */}
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <Link href="/" className="hover:text-blue-600 transition-colors">Home</Link>
+            <div className="flex items-center gap-1.5 text-xs text-[#64748b]">
+              <Link href="/" className="hover:text-[#002147] transition-colors">Home</Link>
               {pathParts.map((part, i) => (
                 <React.Fragment key={i}>
-                  <ChevronRight size={10} className="text-slate-300" />
-                  <span className={i === pathParts.length - 1 ? "text-slate-600 font-medium" : "hover:text-blue-600 transition-colors"}>
+                  <ChevronRight size={10} className="text-[#e2e8f0]" />
+                  <span className={i === pathParts.length - 1 ? "text-[#1e293b] font-medium" : "hover:text-[#002147] transition-colors"}>
                     {decodeURIComponent(part).replace(/-/g, ' ')}
                   </span>
                 </React.Fragment>
@@ -167,11 +222,11 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
             </div>
 
             <div className="relative max-w-sm w-full ml-auto">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#64748b]" size={15} />
               <input
                 type="text"
-                placeholder="Search..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-md py-1.5 pl-9 pr-4 text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                placeholder="Search estimates..."
+                className="w-full bg-slate-50 border border-[#e2e8f0] rounded-md py-1.5 pl-9 pr-4 text-xs focus:ring-2 focus:ring-[#002147]/20 focus:border-[#002147] transition-all outline-none"
               />
             </div>
           </div>
@@ -179,28 +234,28 @@ const Layout = ({ children }: { children: React.ReactNode }) => {
           <div className="flex items-center gap-4 ml-4">
             {/* LME Price */}
             <div className="flex flex-col items-end">
-              <span className="text-[10px] text-slate-400">LME Aluminium</span>
+              <span className="text-[10px] text-[#64748b] font-medium">LME Aluminium</span>
               {lmeLoading ? (
-                <span className="text-xs text-slate-400 flex items-center gap-1">
+                <span className="text-xs text-[#64748b] flex items-center gap-1">
                   <Loader2 size={10} className="animate-spin" /> --
                 </span>
               ) : (
-                <span className="text-xs font-mono font-medium text-slate-700">{lmePrice || '$2,450.00'}</span>
+                <span className="text-xs font-mono font-semibold text-[#002147]">{lmePrice || '$2,450.00'}</span>
               )}
             </div>
 
-            <div className="h-6 w-px bg-slate-200" />
+            <div className="h-6 w-px bg-[#e2e8f0]" />
 
             {/* User */}
-            <div className="flex flex-col items-end">
-              <span className="text-xs font-medium text-slate-700 truncate max-w-[120px]">{displayName}</span>
-              <span className="text-[10px] text-slate-400">{displayRole}</span>
+            <div className="hidden sm:flex flex-col items-end">
+              <span className="text-xs font-medium text-[#1e293b] truncate max-w-[120px]">{displayName}</span>
+              <span className="text-[10px] text-[#64748b]">{displayRole}</span>
             </div>
 
             <button
               onClick={handleLogout}
               title="Log out"
-              className="p-1.5 hover:bg-red-50 rounded-md transition-colors text-slate-400 hover:text-red-500"
+              className="p-1.5 hover:bg-red-50 rounded-md transition-colors text-[#64748b] hover:text-red-500"
             >
               <LogOut size={16} />
             </button>

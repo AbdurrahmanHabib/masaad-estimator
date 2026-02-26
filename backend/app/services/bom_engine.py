@@ -46,16 +46,16 @@ UAE_RATES = {
     "aluminum_capping_aed_kg": 11.00,
     "thermal_break_aed_lm": 8.50,
 
-    # Glass
-    "glass_dgu_6_12_6_aed_sqm": 175.0,          # clear DGU
-    "glass_dgu_low_e_aed_sqm": 220.0,           # low-E DGU
-    "glass_tempered_clear_aed_sqm": 95.0,        # 10mm tempered
-    "glass_tempered_tinted_aed_sqm": 110.0,
-    "glass_laminated_6_6_aed_sqm": 135.0,        # 6+6 laminated
-    "glass_spandrel_aed_sqm": 145.0,             # opaque spandrel
-    "glass_structural_dgu_aed_sqm": 285.0,       # structural glazing DGU
-    "glass_balustrade_aed_sqm": 185.0,           # 12mm tempered/laminated
-    "glass_spider_aed_sqm": 310.0,               # point-fixed
+    # Glass (base material cost — wastage/handling overhead applied separately)
+    "glass_dgu_6_12_6_aed_sqm": 220.0,          # clear DGU (6-12Ar-6) incl. handling/import
+    "glass_dgu_low_e_aed_sqm": 275.0,           # low-E DGU incl. handling/import
+    "glass_tempered_clear_aed_sqm": 130.0,       # 10mm tempered incl. handling/import
+    "glass_tempered_tinted_aed_sqm": 155.0,
+    "glass_laminated_6_6_aed_sqm": 175.0,        # 6+6 laminated incl. handling/import
+    "glass_spandrel_aed_sqm": 185.0,             # opaque spandrel (back-painted) incl. handling/import
+    "glass_structural_dgu_aed_sqm": 350.0,       # structural glazing DGU incl. handling/import
+    "glass_balustrade_aed_sqm": 235.0,           # 12mm tempered/laminated incl. handling/import
+    "glass_spider_aed_sqm": 385.0,               # point-fixed incl. handling/import
 
     # ACP
     "acp_pvdf_4mm_aed_sqm": 85.0,               # PVDF-coated 4mm ACP
@@ -111,9 +111,9 @@ UAE_RATES = {
     "spacer_bar_aed_lm": 12.0,                   # warm-edge spacer bar
     "distance_piece_aed": 2.00,
 
-    # Labor
-    "fab_labor_aed_hr": 13.0,                    # factory fabrication
-    "install_labor_aed_hr": 18.0,                # site installation
+    # Labor (realistic UAE fully-burdened rates)
+    "fab_labor_aed_hr": 13.0,                    # variable per-hour (consumables/OT); fixed cost in FACTORY_MONTHLY_OVERHEAD
+    "install_labor_aed_hr": 18.0,                # site installation per-hour variable; fixed cost in FACTORY_MONTHLY_OVERHEAD
 
     # Site / Logistics
     "scaffolding_aed_sqm_month": 12.0,           # per sqm per month
@@ -145,8 +145,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 120,     # structural silicone per linear metre
         "setting_block_per_sqm": 4,    # EPDM setting blocks
         "spacer_lm_per_sqm": 1.2,     # thermal spacer bar
-        "fab_labor_hr_per_sqm": 3.5,   # fabrication hours
-        "install_labor_hr_per_sqm": 2.5,  # installation hours
+        "fab_labor_hr_per_sqm": 6.0,   # fabrication hours (realistic: 4-8 hrs per panel)
+        "install_labor_hr_per_sqm": 4.0,  # installation hours (realistic: 2-4 hrs per panel)
         # Curtain wall specific breakdowns (% of total aluminum weight)
         "mullion_pct": 0.35,
         "transom_pct": 0.25,
@@ -175,8 +175,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 80,
         "setting_block_per_sqm": 4,
         "spacer_lm_per_sqm": 1.0,
-        "fab_labor_hr_per_sqm": 4.2,
-        "install_labor_hr_per_sqm": 3.0,
+        "fab_labor_hr_per_sqm": 7.0,
+        "install_labor_hr_per_sqm": 5.0,
         "mullion_pct": 0.30,
         "transom_pct": 0.20,
         "pressure_plate_pct": 0.10,
@@ -200,8 +200,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 80,
         "setting_block_per_sqm": 4,
         "spacer_lm_per_sqm": 1.0,
-        "fab_labor_hr_per_sqm": 4.8,
-        "install_labor_hr_per_sqm": 2.8,
+        "fab_labor_hr_per_sqm": 5.0,
+        "install_labor_hr_per_sqm": 3.5,
         "mullion_pct": 0.30,
         "transom_pct": 0.20,
         "pressure_plate_pct": 0.10,
@@ -225,8 +225,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 100,
         "setting_block_per_sqm": 4,
         "spacer_lm_per_sqm": 1.1,
-        "fab_labor_hr_per_sqm": 2.8,
-        "install_labor_hr_per_sqm": 2.0,
+        "fab_labor_hr_per_sqm": 5.0,
+        "install_labor_hr_per_sqm": 3.5,
         "mullion_pct": 0.30,
         "transom_pct": 0.25,
         "pressure_plate_pct": 0.15,
@@ -250,8 +250,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 60,
         "setting_block_per_sqm": 0,
         "spacer_lm_per_sqm": 0,
-        "fab_labor_hr_per_sqm": 2.2,
-        "install_labor_hr_per_sqm": 2.5,
+        "fab_labor_hr_per_sqm": 3.5,
+        "install_labor_hr_per_sqm": 4.0,
         "mullion_pct": 0,
         "transom_pct": 0,
         "pressure_plate_pct": 0,
@@ -275,8 +275,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 60,
         "setting_block_per_sqm": 2,
         "spacer_lm_per_sqm": 0,
-        "fab_labor_hr_per_sqm": 3.0,
-        "install_labor_hr_per_sqm": 3.5,
+        "fab_labor_hr_per_sqm": 4.5,
+        "install_labor_hr_per_sqm": 5.0,
         "mullion_pct": 0,
         "transom_pct": 0,
         "pressure_plate_pct": 0,
@@ -303,8 +303,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 80,
         "setting_block_per_sqm": 0,
         "spacer_lm_per_sqm": 0,
-        "fab_labor_hr_per_sqm": 4.0,
-        "install_labor_hr_per_sqm": 5.0,
+        "fab_labor_hr_per_sqm": 5.5,
+        "install_labor_hr_per_sqm": 6.5,
         "mullion_pct": 0,
         "transom_pct": 0,
         "pressure_plate_pct": 0,
@@ -331,8 +331,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 90,
         "setting_block_per_sqm": 4,
         "spacer_lm_per_sqm": 1.0,
-        "fab_labor_hr_per_sqm": 4.5,
-        "install_labor_hr_per_sqm": 3.5,
+        "fab_labor_hr_per_sqm": 6.5,
+        "install_labor_hr_per_sqm": 5.0,
         "mullion_pct": 0.30,
         "transom_pct": 0.25,
         "pressure_plate_pct": 0.10,
@@ -359,8 +359,8 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
         "silicone_ml_per_lm": 100,
         "setting_block_per_sqm": 4,
         "spacer_lm_per_sqm": 1.0,
-        "fab_labor_hr_per_sqm": 3.5,
-        "install_labor_hr_per_sqm": 2.5,
+        "fab_labor_hr_per_sqm": 5.0,
+        "install_labor_hr_per_sqm": 3.5,
         "mullion_pct": 0.30,
         "transom_pct": 0.25,
         "pressure_plate_pct": 0.15,
@@ -382,6 +382,35 @@ SYSTEM_RATIOS: Dict[str, Dict] = {
 
 # Attic stock factor (Blind Spot Rule: 2% added to all quantities)
 ATTIC_STOCK_PCT = 0.02
+
+# ── Factory monthly overhead ──────────────────────────────────────────────────
+# 200K AED/month covers: core salaries, rent, utilities, equipment depreciation,
+# consumables, supervisory staff, QC, store/logistics personnel
+FACTORY_MONTHLY_OVERHEAD_AED = 200_000.0
+
+# ── Material wastage/overhead factors ─────────────────────────────────────────
+# Applied on top of material unit costs to account for handling, cutting waste,
+# import duties, storage, and breakage in transit.
+WASTAGE_FACTORS = {
+    "GLASS": 1.15,      # 15% — breakage, cutting waste, import handling
+    "ALUMINUM": 1.10,    # 10% — cutting waste, offcuts < 800mm unusable
+    "ACP": 1.10,         # 10% — cutting waste, edge trim
+    "SEALANT": 1.05,     # 5% — partial tube waste
+    "HARDWARE": 1.05,    # 5% — damaged/defective in transit
+    "FIXING": 1.05,      # 5% — lost/damaged fasteners
+    "SURFACE": 1.05,     # 5% — rework/touch-up allowance
+}
+
+# ── Project overhead percentages (applied to subtotal) ────────────────────────
+PROJECT_OVERHEAD = {
+    "project_management_pct": 0.05,      # 5% — PM, coordination, submittals
+    "design_engineering_pct": 0.03,      # 3% — shop drawings, structural calcs
+    "insurance_pct": 0.015,              # 1.5% — CAR insurance, third-party liability
+    "warranty_provision_pct": 0.02,      # 2% — 12-month defects liability provision
+}
+
+# Gross margin
+GROSS_MARGIN_PCT = 0.18
 
 
 @dataclass
@@ -410,7 +439,7 @@ class BOMEngine:
         opening: Dict[str, Any],
         catalog_items: List[Dict[str, Any]],
         lme_aed_per_kg: float = 7.0,
-        labor_burn_rate: float = 13.0,
+        labor_burn_rate: float = 48.75,
         rates: Optional[Dict[str, float]] = None,
     ) -> List[BOMLineItem]:
         """
@@ -1106,7 +1135,7 @@ class BOMEngine:
         openings: List[Dict[str, Any]],
         catalog_items: List[Dict[str, Any]],
         lme_aed_per_kg: float = 7.0,
-        labor_burn_rate: float = 13.0,
+        labor_burn_rate: float = 48.75,
         rates: Optional[Dict[str, float]] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -1239,6 +1268,18 @@ class BOMEngine:
             notes="Blind Spot: Independent 3rd-party water test",
         ))
 
+        # ══════════════════════════════════════════════════════════════════════
+        # APPLY WASTAGE/OVERHEAD FACTORS to material line items
+        # ══════════════════════════════════════════════════════════════════════
+        for item in all_items:
+            factor = WASTAGE_FACTORS.get(item.category, 1.0)
+            if factor > 1.0:
+                item.unit_cost_aed = _r(item.unit_cost_aed * factor)
+                item.subtotal_aed = _r(item.quantity * item.unit_cost_aed)
+                if factor > 1.0 and not item.notes:
+                    pct = round((factor - 1) * 100)
+                    item.notes = f"Incl. {pct}% wastage/handling overhead"
+
         return [self._item_to_dict(i) for i in all_items]
 
     def aggregate_by_item_code(self, bom_items: List[Dict]) -> List[Dict]:
@@ -1256,9 +1297,16 @@ class BOMEngine:
         return list(rolled.values())
 
     def generate_summary(self, bom_items: List[Dict]) -> Dict[str, Any]:
-        """Generate financial summary from BOM items."""
+        """Generate financial summary from BOM items including factory overhead, project overheads, and margin."""
         totals_by_cat: Dict[str, float] = {}
         grand_total = 0.0
+        total_labor_hours = 0.0
+        total_facade_sqm = 0.0
+        total_weight_kg = 0.0
+        total_openings = 0
+
+        # Count unique openings via source_opening_id
+        seen_openings: set = set()
 
         for item in bom_items:
             cat = item.get("category", "OTHER")
@@ -1266,8 +1314,67 @@ class BOMEngine:
             totals_by_cat[cat] = totals_by_cat.get(cat, 0) + sub
             grand_total += sub
 
+            # Accumulate labor hours for factory overhead calculation
+            if cat == "LABOR" and item.get("unit") == "hr":
+                total_labor_hours += float(item.get("quantity", 0))
+
+            # Accumulate weight (aluminum + steel)
+            if cat in ("ALUMINUM", "STEEL") and item.get("unit") == "kg":
+                total_weight_kg += float(item.get("quantity", 0))
+
+            # Accumulate facade area (glass sqm as proxy)
+            if cat == "GLASS" and item.get("unit") == "sqm":
+                total_facade_sqm += float(item.get("quantity", 0))
+
+            # Track unique openings
+            oid = item.get("source_opening_id")
+            if oid and not item.get("is_attic_stock"):
+                seen_openings.add(oid)
+
+        total_openings = len(seen_openings) or max(1, len(bom_items) // 15)
+
+        direct_material_aed = _r(sum(v for k, v in totals_by_cat.items()
+                                     if k not in ("LABOR", "SITE", "TESTING", "PROVISIONAL")))
+        direct_labor_aed = _r(totals_by_cat.get("LABOR", 0))
+        site_cost = _r(totals_by_cat.get("SITE", 0))
+        testing_cost = _r(totals_by_cat.get("TESTING", 0))
+        provisional_cost = _r(totals_by_cat.get("PROVISIONAL", 0))
+
+        # Factory overhead — 200K AED/month based on project duration from labor hours
+        # 8 hrs/day, 22 working days/month
+        project_months = max(1.0, total_labor_hours / (8 * 22))
+        factory_overhead_aed = _r(project_months * FACTORY_MONTHLY_OVERHEAD_AED)
+
+        # Direct cost subtotal (before project overheads, includes factory overhead)
+        direct_subtotal = _r(grand_total + factory_overhead_aed)
+
+        # Project overheads (applied to direct subtotal)
+        pm_cost = _r(direct_subtotal * PROJECT_OVERHEAD["project_management_pct"])
+        design_cost = _r(direct_subtotal * PROJECT_OVERHEAD["design_engineering_pct"])
+        insurance_cost = _r(direct_subtotal * PROJECT_OVERHEAD["insurance_pct"])
+        warranty_cost = _r(direct_subtotal * PROJECT_OVERHEAD["warranty_provision_pct"])
+        total_overhead = _r(pm_cost + design_cost + insurance_cost + warranty_cost)
+        overhead_pct = sum(PROJECT_OVERHEAD.values()) * 100  # 11.5%
+
+        # Subtotal including overheads
+        subtotal_with_overhead = _r(direct_subtotal + total_overhead)
+
+        # Gross margin (18%)
+        margin_aed = _r(subtotal_with_overhead * GROSS_MARGIN_PCT)
+        total_before_vat = _r(subtotal_with_overhead + margin_aed)
+
+        # VAT
+        vat_aed = _r(total_before_vat * 0.05)
+        total_incl_vat = _r(total_before_vat + vat_aed)
+
         return {
-            "material_cost_aed": _r(sum(v for k, v in totals_by_cat.items() if k not in ("LABOR", "SITE", "TESTING", "PROVISIONAL"))),
+            "currency": "AED",
+            # Direct costs
+            "direct_material_aed": direct_material_aed,
+            "direct_labor_aed": direct_labor_aed,
+            "factory_overhead_aed": factory_overhead_aed,
+            "project_months": _r(project_months, 1),
+            # Category breakdown
             "aluminum_cost_aed": _r(totals_by_cat.get("ALUMINUM", 0)),
             "glass_cost_aed": _r(totals_by_cat.get("GLASS", 0)),
             "acp_cost_aed": _r(totals_by_cat.get("ACP", 0)),
@@ -1275,11 +1382,32 @@ class BOMEngine:
             "sealant_cost_aed": _r(totals_by_cat.get("SEALANT", 0)),
             "fixing_cost_aed": _r(totals_by_cat.get("FIXING", 0)),
             "surface_cost_aed": _r(totals_by_cat.get("SURFACE", 0)),
-            "labor_cost_aed": _r(totals_by_cat.get("LABOR", 0)),
-            "site_cost_aed": _r(totals_by_cat.get("SITE", 0)),
-            "testing_cost_aed": _r(totals_by_cat.get("TESTING", 0)),
-            "provisional_sums_aed": _r(totals_by_cat.get("PROVISIONAL", 0)),
-            "subtotal_aed": _r(grand_total),
+            "labor_cost_aed": direct_labor_aed,
+            "site_cost_aed": site_cost,
+            "testing_cost_aed": testing_cost,
+            "provisional_sums_aed": provisional_cost,
+            "direct_subtotal_aed": direct_subtotal,
+            # Project overheads
+            "project_management_aed": pm_cost,
+            "design_engineering_aed": design_cost,
+            "insurance_aed": insurance_cost,
+            "warranty_provision_aed": warranty_cost,
+            "overhead_aed": total_overhead,
+            "overhead_pct": overhead_pct,
+            # Margin
+            "subtotal_with_overhead_aed": subtotal_with_overhead,
+            "gross_margin_pct": GROSS_MARGIN_PCT,
+            "margin_aed": margin_aed,
+            # Final totals
+            "total_before_vat_aed": total_before_vat,
+            "vat_5_pct_aed": vat_aed,
+            "total_incl_vat_aed": total_incl_vat,
+            "total_aed": total_before_vat,  # backwards compat — excl. VAT
+            # Project metrics
+            "total_openings": total_openings,
+            "total_facade_sqm": _r(total_facade_sqm, 1),
+            "total_weight_kg": _r(total_weight_kg, 1),
+            "total_labor_hours": _r(total_labor_hours, 1),
             "total_line_items": len(bom_items),
             "category_breakdown": {k: _r(v) for k, v in totals_by_cat.items()},
         }

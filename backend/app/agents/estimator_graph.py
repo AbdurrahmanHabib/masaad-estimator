@@ -3,6 +3,7 @@ LangGraph State Graph — Masaad Estimator Pipeline.
 
 Node execution order:
   IngestionNode → ScopeIdentificationNode → GeometryQANode → BOMNode
+      → EngineeringNode (41-point forensic analysis)
       → [HITLTriageNode if confidence < 0.90 or hitl_pending]
       → DeltaCompareNode → PricingNode → CommercialNode
       → [InternationalRoutingNode if is_international]
@@ -536,7 +537,36 @@ async def _bom_impl(state: GraphState) -> GraphState:
     await _persist_estimate(estimate_id, {
         "current_step": "BOM complete",
         "progress_pct": 30,
-        "bom_output_json": {"items": bom_items},
+        "bom_output_json": {"items": bom_items, "summary": bom_summary},
+    })
+    return state
+
+
+async def _engineering_impl(state: GraphState) -> GraphState:
+    """EngineeringNode — runs 41-point forensic engineering analysis."""
+    from app.services.engineering_engine import EngineeringEngine
+
+    estimate_id = state["estimate_id"]
+    openings = state.get("extracted_openings", [])
+    spec_text = state.get("spec_text", "")
+
+    engine = EngineeringEngine()
+    engineering_results = engine.analyze_all(openings, spec_text)
+
+    state["engineering_results"] = engineering_results
+
+    logger.info(
+        f"[{estimate_id}] EngineeringNode: {engineering_results['summary']['total_checks']} checks, "
+        f"{engineering_results['summary']['pass']} pass, {engineering_results['summary']['fail']} fail"
+    )
+
+    await _persist_estimate(estimate_id, {
+        "current_step": "Engineering analysis complete",
+        "progress_pct": 35,
+        "state_snapshot": {
+            **(state.get("_prev_snapshot", {}) if isinstance(state.get("_prev_snapshot"), dict) else {}),
+            "engineering_results": engineering_results,
+        },
     })
     return state
 
@@ -704,14 +734,18 @@ async def _pricing_impl(state: GraphState) -> GraphState:
         "gross_margin_pct": margin_pct * 100,
         "total_aed": total,
         "lme_aed_per_kg_used": lme_aed,
-        "currency": state.get("project_currency", "AED"),
+        "currency": "AED",
         "priced_at": datetime.now(timezone.utc).isoformat(),
     }
 
     state["pricing_data"] = pricing_data
     logger.info(f"[{estimate_id}] PricingNode: AED {total:,.0f} total (margin {margin_pct*100:.0f}%)")
 
-    await _persist_estimate(estimate_id, {"current_step": "Pricing complete", "progress_pct": 60})
+    await _persist_estimate(estimate_id, {
+        "current_step": "Pricing complete",
+        "progress_pct": 60,
+        "financial_json": pricing_data,
+    })
     return state
 
 
@@ -1147,6 +1181,7 @@ def build_estimator_graph(redis_client=None):
     graph.add_node("ScopeIdentificationNode",  _n("ScopeIdentificationNode", 15, _scope_impl))
     graph.add_node("GeometryQANode",           _n("GeometryQANode", 22, _geometry_qa_impl))
     graph.add_node("BOMNode",                  _n("BOMNode", 30, _bom_impl,                         critical=True))
+    graph.add_node("EngineeringNode",          _n("EngineeringNode", 33, _engineering_impl))
     graph.add_node("HITLTriageNode",           _n("HITLTriageNode", 35, _hitl_triage_impl))
     graph.add_node("DeltaCompareNode",         _n("DeltaCompareNode", 45, _delta_compare_impl))
     graph.add_node("PricingNode",              _n("PricingNode", 60, _pricing_impl))
@@ -1162,10 +1197,13 @@ def build_estimator_graph(redis_client=None):
     graph.add_edge("ScopeIdentificationNode", "GeometryQANode")
     graph.add_edge("GeometryQANode", "BOMNode")
 
-    # Post-BOM: route to HITL if confidence < 0.90 or hitl_pending == True.
+    # BOM -> Engineering (41-point forensic analysis)
+    graph.add_edge("BOMNode", "EngineeringNode")
+
+    # Post-Engineering: route to HITL if confidence < 0.90 or hitl_pending == True.
     # This also catches critical=True node failures where hitl_pending was forced.
     graph.add_conditional_edges(
-        "BOMNode",
+        "EngineeringNode",
         should_triage,
         {"HITLTriageNode": "HITLTriageNode", "DeltaCompareNode": "DeltaCompareNode"},
     )

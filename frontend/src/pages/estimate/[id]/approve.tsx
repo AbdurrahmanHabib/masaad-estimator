@@ -36,9 +36,9 @@ interface EstimateData {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  ESTIMATING: 'bg-blue-50 text-blue-700 border-blue-200',
+  ESTIMATING: 'bg-blue-50 text-[#002147] border-blue-200',
   REVIEW_REQUIRED: 'bg-amber-50 text-amber-700 border-amber-200',
-  APPROVED: 'bg-green-50 text-green-700 border-green-200',
+  APPROVED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   DISPATCHED: 'bg-purple-50 text-purple-700 border-purple-200',
 };
 
@@ -85,7 +85,7 @@ export default function ApprovePage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-32">
-        <Loader2 className="animate-spin text-slate-400" size={28} />
+        <Loader2 className="animate-spin text-[#64748b]" size={28} />
       </div>
     );
   }
@@ -94,10 +94,10 @@ export default function ApprovePage() {
     return (
       <div className="flex items-center justify-center py-32">
         <div className="text-center space-y-4">
-          <AlertTriangle size={40} className="mx-auto text-red-400" />
-          <p className="text-slate-700 font-semibold">Failed to load estimate</p>
-          <p className="text-xs text-red-500 max-w-md">{error}</p>
-          <Link href={`/estimate/${id}`} className="text-sm text-blue-600 hover:underline">
+          <AlertTriangle size={40} className="mx-auto text-[#dc2626]" />
+          <p className="text-[#1e293b] font-semibold">Failed to load estimate</p>
+          <p className="text-xs text-[#dc2626] max-w-md">{error}</p>
+          <Link href={`/estimate/${id}`} className="text-sm text-[#002147] hover:underline">
             Back to Estimate
           </Link>
         </div>
@@ -112,68 +112,68 @@ export default function ApprovePage() {
   const veTotal = estimate.ve_opportunities?.reduce((s, v) => s + (v.saving_aed || 0), 0) ?? 0;
   const canApprove = estimate.status === 'REVIEW_REQUIRED';
   const isApproved = estimate.status === 'APPROVED' || estimate.status === 'DISPATCHED';
-  const statusStyle = STATUS_STYLES[estimate.status] || 'bg-slate-50 text-slate-600 border-slate-200';
+  const statusStyle = STATUS_STYLES[estimate.status] || 'bg-slate-50 text-[#64748b] border-slate-200';
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3 mb-2">
         <Link href={`/estimate/${id}`} className="p-1.5 hover:bg-slate-100 rounded-md transition-colors">
-          <ArrowLeft size={18} className="text-slate-400" />
+          <ArrowLeft size={18} className="text-[#64748b]" />
         </Link>
         <div className="flex-1">
-          <h1 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-            <ShieldAlert size={20} className="text-amber-500" />
+          <h1 className="text-lg font-bold text-[#002147] flex items-center gap-2">
+            <ShieldAlert size={20} className="text-[#d4a017]" />
             Approval Gateway
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-[#64748b] mt-0.5">
             {estimate.project_name || `Estimate ${(estimate.estimate_id || '').slice(0, 8)}`}
           </p>
         </div>
-        <span className={`px-2.5 py-0.5 text-[11px] font-semibold rounded border ${statusStyle}`}>
+        <span className={`px-2.5 py-0.5 text-[11px] font-semibold rounded-md border ${statusStyle}`}>
           {estimate.status.replace(/_/g, ' ')}
         </span>
       </div>
 
       {/* Alerts */}
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm flex items-center gap-2">
+        <div className="p-3 bg-red-50 border border-red-200 rounded-md text-[#dc2626] text-sm flex items-center gap-2">
           <AlertTriangle size={16} /> {error}
         </div>
       )}
       {success && (
-        <div className="p-3 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm flex items-center gap-2">
+        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-md text-emerald-700 text-sm flex items-center gap-2">
           <CheckCircle size={16} /> {success}
         </div>
       )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-slate-500 text-xs mb-1">
+        <div className="bg-white border border-[#e2e8f0] rounded-md p-4">
+          <div className="flex items-center gap-2 text-[#64748b] text-xs mb-1">
             <DollarSign size={12} /> Contract Value
           </div>
-          <p className="text-lg font-semibold text-slate-800 font-mono">
+          <p className="text-lg font-semibold text-[#002147] font-mono">
             AED {totalAED.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-slate-500 text-xs mb-1">
+        <div className="bg-white border border-[#e2e8f0] rounded-md p-4">
+          <div className="flex items-center gap-2 text-[#64748b] text-xs mb-1">
             <ClipboardList size={12} /> BOM Items
           </div>
-          <p className="text-lg font-semibold text-slate-800">{bomItemCount}</p>
+          <p className="text-lg font-semibold text-[#1e293b]">{bomItemCount}</p>
         </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-slate-500 text-xs mb-1">
+        <div className="bg-white border border-[#e2e8f0] rounded-md p-4">
+          <div className="flex items-center gap-2 text-[#64748b] text-xs mb-1">
             <BarChart3 size={12} /> Progress
           </div>
-          <p className="text-lg font-semibold text-slate-800">{estimate.progress_pct}%</p>
+          <p className="text-lg font-semibold text-[#1e293b]">{estimate.progress_pct}%</p>
         </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-slate-500 text-xs mb-1">
+        <div className="bg-white border border-[#e2e8f0] rounded-md p-4">
+          <div className="flex items-center gap-2 text-[#64748b] text-xs mb-1">
             <Zap size={12} /> VE Savings
           </div>
-          <p className="text-lg font-semibold text-green-600 font-mono">
+          <p className="text-lg font-semibold text-[#059669] font-mono">
             AED {veTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}
           </p>
         </div>
@@ -181,9 +181,9 @@ export default function ApprovePage() {
 
       {/* Financial breakdown */}
       {estimate.financial_summary && Object.keys(estimate.financial_summary).length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-lg p-5">
-          <h2 className="font-semibold text-slate-800 mb-4 flex items-center gap-2 text-sm">
-            <BarChart3 size={16} className="text-blue-600" />
+        <div className="bg-white border border-[#e2e8f0] rounded-md p-6">
+          <h2 className="font-semibold text-[#002147] mb-4 flex items-center gap-2 text-sm">
+            <BarChart3 size={16} className="text-[#002147]" />
             Financial Summary
           </h2>
           <div className="space-y-2 text-sm">
@@ -194,9 +194,9 @@ export default function ApprovePage() {
                 ? `${(estimate.financial_summary.gross_margin_pct * 100).toFixed(1)}%`
                 : undefined],
             ].filter(([, v]) => v !== undefined && v !== null).map(([label, value]) => (
-              <div key={label as string} className="flex justify-between py-2 border-b border-slate-100">
-                <span className="text-slate-500">{label as string}</span>
-                <span className="font-mono text-slate-800">
+              <div key={label as string} className="flex justify-between py-2 border-b border-[#e2e8f0]">
+                <span className="text-[#64748b]">{label as string}</span>
+                <span className="font-mono text-[#1e293b]">
                   {typeof value === 'number'
                     ? `AED ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                     : value}
@@ -204,8 +204,8 @@ export default function ApprovePage() {
               </div>
             ))}
             <div className="flex justify-between pt-3 font-semibold">
-              <span className="text-slate-800">Total Contract Value</span>
-              <span className="font-mono text-slate-900">
+              <span className="text-[#002147]">Total Contract Value</span>
+              <span className="font-mono text-[#002147]">
                 AED {totalAED.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
@@ -214,37 +214,37 @@ export default function ApprovePage() {
       )}
 
       {/* Approval action */}
-      <div className="bg-white border border-slate-200 rounded-lg p-6">
-        <h2 className="font-semibold text-slate-800 mb-3 flex items-center gap-2 text-sm">
-          <CheckCircle size={16} className="text-green-600" />
+      <div className="bg-white border border-[#e2e8f0] rounded-md p-6">
+        <h2 className="font-semibold text-[#002147] mb-3 flex items-center gap-2 text-sm">
+          <CheckCircle size={16} className="text-[#059669]" />
           Final Sign-Off
         </h2>
 
         {isApproved ? (
-          <div className="flex items-center gap-3 text-green-600 py-2">
-            <CheckCircle size={22} />
+          <div className="flex items-center gap-3 text-[#059669] py-2">
+            <CheckCircle size={20} />
             <div>
               <p className="font-semibold">Estimate Approved</p>
-              <p className="text-sm text-slate-500">Report generation has been initiated.</p>
+              <p className="text-sm text-[#64748b]">Report generation has been initiated.</p>
             </div>
           </div>
         ) : canApprove ? (
           <div>
-            <p className="text-slate-500 text-sm mb-4">
+            <p className="text-[#64748b] text-sm mb-4">
               By approving this estimate, you confirm that all BOM items, pricing, compliance checks,
               and VE decisions have been reviewed. Report generation will begin immediately after approval.
             </p>
             <button
               onClick={handleApprove}
               disabled={approving}
-              className="flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium text-sm transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#d4a017] hover:bg-[#b8900f] text-[#002147] rounded-md font-semibold text-sm transition-colors disabled:opacity-50"
             >
               {approving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle size={16} />}
               {approving ? 'Processing...' : 'Approve and Generate Reports'}
             </button>
           </div>
         ) : (
-          <p className="text-slate-500 text-sm">
+          <p className="text-[#64748b] text-sm">
             Estimate is in <strong>{estimate.status.replace(/_/g, ' ')}</strong> status. Approval is not available in this state.
           </p>
         )}
@@ -254,19 +254,19 @@ export default function ApprovePage() {
       <div className="flex gap-3 flex-wrap">
         <Link
           href={`/estimate/${id}`}
-          className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-sm text-slate-700 transition-colors"
+          className="px-4 py-2 bg-white border border-[#e2e8f0] hover:bg-slate-50 rounded-md text-sm text-[#1e293b] transition-colors"
         >
           Back to Estimate
         </Link>
         <Link
           href={`/estimate/${id}/compliance`}
-          className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-sm text-slate-700 transition-colors"
+          className="px-4 py-2 bg-white border border-[#e2e8f0] hover:bg-slate-50 rounded-md text-sm text-[#1e293b] transition-colors"
         >
           Compliance Report
         </Link>
         <Link
           href={`/estimate/${id}/ve-menu`}
-          className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-sm text-slate-700 transition-colors"
+          className="px-4 py-2 bg-white border border-[#e2e8f0] hover:bg-slate-50 rounded-md text-sm text-[#1e293b] transition-colors"
         >
           VE Menu
         </Link>
