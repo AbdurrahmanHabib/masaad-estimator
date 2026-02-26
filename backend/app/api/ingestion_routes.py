@@ -4,7 +4,7 @@ import shutil
 import uuid
 import logging
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -182,6 +182,166 @@ async def execute_fusion(
     except Exception as exc:
         logger.warning(f"Celery unavailable: {exc}")
         return {"estimate_id": estimate_id, "status": "queued_no_worker", "warning": str(exc)}
+
+
+# ─── Run pipeline directly (no Celery/Redis required) ─────────────────────────
+
+async def _run_pipeline_inline(estimate_id: str, user_id: str):
+    """Run the LangGraph pipeline directly in the FastAPI process."""
+    from datetime import datetime, timezone
+    from app.agents.estimator_graph import estimator_graph
+    from app.db import AsyncSessionLocal
+    from app.models.orm_models import Estimate, FinancialRates
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Estimate).where(Estimate.id == estimate_id)
+            )
+            estimate = result.scalar_one_or_none()
+            if not estimate:
+                logger.error(f"[{estimate_id}] Estimate not found for pipeline")
+                return
+
+            estimate.status = "ESTIMATING"
+            estimate.current_step = "Pipeline starting..."
+            estimate.progress_pct = 5
+            await session.commit()
+
+            # Get LME rate
+            lme_rate = 7.0
+            try:
+                rates_result = await session.execute(
+                    select(FinancialRates).where(
+                        FinancialRates.tenant_id == estimate.tenant_id
+                    )
+                )
+                rates = rates_result.scalar_one_or_none()
+                if rates and rates.lme_aluminum_usd_mt and rates.usd_aed:
+                    lme_rate = float(rates.lme_aluminum_usd_mt) * float(rates.usd_aed) / 1000
+            except Exception:
+                pass
+
+            raw = estimate.raw_data_json or {}
+            state = {
+                "estimate_id": estimate_id,
+                "tenant_id": estimate.tenant_id,
+                "user_id": user_id,
+                "current_node": "IngestionNode",
+                "status": "ESTIMATING",
+                "progress_pct": 5,
+                "checkpoint_key": f"ckpt:{estimate_id}",
+                "last_completed_node": "",
+                "hitl_pending": False,
+                "hitl_triage_ids": [],
+                "confidence_score": 1.0,
+                "drawing_paths": [raw.get("dwg_path")] if raw.get("dwg_path") else [],
+                "spec_text": "",
+                "revision_number": estimate.revision_number or 0,
+                "extracted_openings": [],
+                "catalog_matches": [],
+                "bom_items": [],
+                "cutting_list": [],
+                "pricing_data": {},
+                "ve_suggestions": [],
+                "lme_aed_per_kg": lme_rate,
+                "project_currency": "AED",
+                "is_international": raw.get("project_country", "UAE").upper() != "UAE",
+                "prev_bom_snapshot": estimate.bom_snapshot_json,
+                "variation_order_delta": None,
+                "approval_required": True,
+                "approved_by": None,
+                "compliance_report": None,
+                "scurve_cashflow": None,
+                "milestone_schedule": None,
+                "yield_report": None,
+                "ve_menu": None,
+                "rfi_log": [],
+                "error": None,
+                "error_node": None,
+            }
+
+        # Run graph outside session context
+        logger.info(f"[{estimate_id}] Starting inline pipeline execution")
+        final_state = await estimator_graph.ainvoke(state)
+        logger.info(f"[{estimate_id}] Pipeline complete, status={final_state.get('status')}")
+
+        # Persist results
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Estimate).where(Estimate.id == estimate_id)
+            )
+            estimate = result.scalar_one_or_none()
+            if estimate:
+                estimate.status = final_state.get("status", "REVIEW_REQUIRED")
+                estimate.progress_pct = final_state.get("progress_pct", 100)
+                estimate.current_step = final_state.get("current_node", "Complete")
+                estimate.bom_output_json = {"items": final_state.get("bom_items", [])}
+                estimate.project_scope_json = final_state.get("project_scope") if isinstance(final_state.get("project_scope"), dict) else {}
+                estimate.opening_schedule_json = {"openings": final_state.get("extracted_openings", [])}
+                estimate.cutting_list_json = {"items": final_state.get("cutting_list", [])}
+                estimate.financial_json = final_state.get("pricing_data", {})
+                estimate.reasoning_log = final_state.get("reasoning_log", []) if isinstance(final_state.get("reasoning_log"), list) else []
+                if final_state.get("bom_items"):
+                    estimate.bom_snapshot_json = {
+                        "items": final_state.get("bom_items", []),
+                        "revision": final_state.get("revision_number", 0),
+                        "snapshot_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                await session.commit()
+                logger.info(f"[{estimate_id}] Results persisted to DB")
+
+    except Exception as e:
+        logger.error(f"[{estimate_id}] Pipeline failed: {e}", exc_info=True)
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(Estimate).where(Estimate.id == estimate_id)
+                )
+                estimate = result.scalar_one_or_none()
+                if estimate:
+                    estimate.status = "Failed"
+                    estimate.current_step = f"Error: {str(e)[:200]}"
+                    estimate.reasoning_log = (estimate.reasoning_log or []) + [
+                        {"event": "pipeline_error", "error": str(e)}
+                    ]
+                    await session.commit()
+        except Exception:
+            pass
+
+
+@router.post("/run-pipeline")
+async def run_pipeline_direct(
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Run the estimation pipeline directly (no Celery/Redis required).
+    Executes asynchronously in a background task.
+    """
+    estimate_id = payload.get("estimate_id")
+    if not estimate_id:
+        raise HTTPException(400, "estimate_id required")
+
+    result = await db.execute(select(Estimate).where(Estimate.id == estimate_id))
+    estimate = result.scalar_one_or_none()
+    if not estimate:
+        raise HTTPException(404, "Estimate not found")
+
+    estimate.status = "Queued"
+    estimate.progress_pct = 0
+    estimate.current_step = "Pipeline queued (direct)"
+    await db.commit()
+
+    background_tasks.add_task(_run_pipeline_inline, estimate_id, str(current_user.id))
+
+    return {
+        "estimate_id": estimate_id,
+        "status": "running",
+        "message": "Pipeline started directly. Poll /api/ingestion/estimate/{estimate_id} for progress.",
+    }
 
 
 # ─── Standalone file upload (backward compat) ─────────────────────────────────
