@@ -399,6 +399,12 @@ async def estimate_status(estimate_id: str):
         return {"estimate_id": estimate_id, "status": "unknown", "error": str(e)}
 
 
+@app.get("/api/v1/estimates/recent")
+async def recent_estimates_v1_shortcut(request: Request):
+    """Shortcut route — must be registered BEFORE the {estimate_id} param route."""
+    return await recent_estimates_v1(request)
+
+
 @app.get("/api/v1/estimates/{estimate_id}")
 async def get_estimate_v1(estimate_id: str, request: Request):
     """
