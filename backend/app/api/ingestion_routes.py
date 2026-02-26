@@ -89,12 +89,14 @@ async def new_project(
     # --- Create Project ---
     project = Project(
         id=str(uuid.uuid4()),
-        tenant_id=uuid.UUID(tenant_id) if tenant_id else None,
+        tenant_id=tenant_id,
         name=project_name,
         client_name=client_name,
-        location=project_location,
+        location_zone=project_location,
         project_country=project_country,
-        status="Active",
+        is_international=(project_country.upper() != "UAE"),
+        scope_boundary=scope_boundary,
+        complexity_multiplier=complexity_multiplier,
         created_by=current_user.id,
     )
     db.add(project)
@@ -102,10 +104,9 @@ async def new_project(
 
     # --- Create Estimate ---
     estimate = Estimate(
-        id=uuid.UUID(estimate_id),
+        id=estimate_id,
         project_id=project.id,
         tenant_id=project.tenant_id,
-        created_by=current_user.id,
         status="Queued",
         progress_pct=0,
         current_step="Queued — waiting for worker",
@@ -162,7 +163,7 @@ async def execute_fusion(
     if not estimate_id:
         raise HTTPException(400, "estimate_id required")
 
-    result = await db.execute(select(Estimate).where(Estimate.id == uuid.UUID(estimate_id)))
+    result = await db.execute(select(Estimate).where(Estimate.id == estimate_id))
     estimate = result.scalar_one_or_none()
     if not estimate:
         raise HTTPException(404, "Estimate not found")
@@ -251,7 +252,7 @@ async def upload_additional_file(
     current_user: User = Depends(get_current_user),
 ):
     """Add an extra file (Excel BOQ, site photo, etc.) to an existing estimate."""
-    result = await db.execute(select(Estimate).where(Estimate.id == uuid.UUID(estimate_id)))
+    result = await db.execute(select(Estimate).where(Estimate.id == estimate_id))
     estimate = result.scalar_one_or_none()
     if not estimate:
         raise HTTPException(404, "Estimate not found")
@@ -352,7 +353,7 @@ async def get_estimate(
     """Get full estimate data for the workspace."""
     from app.models.orm_models import Project
 
-    result = await db.execute(select(Estimate).where(Estimate.id == uuid.UUID(estimate_id)))
+    result = await db.execute(select(Estimate).where(Estimate.id == estimate_id))
     estimate = result.scalar_one_or_none()
     if not estimate:
         raise HTTPException(404, "Estimate not found")

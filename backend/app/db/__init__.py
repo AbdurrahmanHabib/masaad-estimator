@@ -54,6 +54,10 @@ async def init_db():
     from app.models import orm_models  # noqa: F401
     try:
         async with engine.begin() as conn:
+            # Drop and recreate to pick up schema changes (safe during early dev)
+            if os.getenv("DB_RESET_ON_STARTUP", "").lower() in ("1", "true", "yes"):
+                logger.warning("DB_RESET_ON_STARTUP=true — dropping all tables")
+                await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables initialized.")
     except Exception as e:

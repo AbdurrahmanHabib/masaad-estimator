@@ -224,6 +224,8 @@ class Project(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     tenant_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("tenants.id"))
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    client_name: Mapped[Optional[str]] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(50), default="Active")
     location_zone: Mapped[Optional[str]] = mapped_column(String(100))
     project_country: Mapped[str] = mapped_column(String(100), default="UAE")
     is_international: Mapped[bool] = mapped_column(Boolean, default=False)
