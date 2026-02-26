@@ -18,3 +18,10 @@ tmp_page.png
 *.dxf
 *.dwg
 downloads/
+
+# Claude skills (1326 files, not project code)
+.claude/skills/
+.claude/plans/
+
+# Uploads
+uploads/

@@ -7,8 +7,15 @@ import os
 import asyncio
 import logging
 import json
+import time
+import collections
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+from app.services.logging_config import setup_logging
+from app.services.middleware import RequestTimingMiddleware
+from app.services.perf_monitor import tracker as perf_tracker
 
 # Load .env file automatically in dev (no-op if python-dotenv not installed or file missing)
 try:
@@ -20,11 +27,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import asyncpg
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-)
+# Replace basicConfig with structured JSON logging
+_log_level = os.getenv("LOG_LEVEL", "INFO")
+_json_logs = os.getenv("LOG_FORMAT", "json").lower() != "text"
+setup_logging(level=_log_level, json_output=_json_logs)
 logger = logging.getLogger("masaad-api")
+
+# Record process start time for uptime calculation
+_PROCESS_START = time.monotonic()
 
 # Startup validation
 for var in ["DATABASE_URL", "JWT_SECRET_KEY"]:
@@ -103,13 +113,82 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ---------------------------------------------------------------------------
+# Rate Limiting Middleware
+# ---------------------------------------------------------------------------
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    In-memory sliding-window rate limiter.
+    Buckets:
+      - /api/auth/login, /api/auth/register : 5 req/min per IP
+      - file upload endpoints (multipart)   : 10 req/min per IP
+      - everything else                     : 60 req/min per IP
+    """
+    def __init__(self, app):
+        super().__init__(app)
+        # {bucket_key: deque of timestamps}
+        self._windows: dict = collections.defaultdict(collections.deque)
+
+    def _get_limit(self, path: str) -> int:
+        if path in ("/api/auth/login", "/api/auth/register"):
+            return 5
+        if path.startswith("/api/ingestion/upload") or "upload" in path:
+            return 10
+        return 60
+
+    async def dispatch(self, request: Request, call_next):
+        ip = request.client.host if request.client else "unknown"
+        path = request.url.path
+        limit = self._get_limit(path)
+        bucket = f"{ip}:{path if limit <= 10 else 'general'}"
+        now = time.monotonic()
+        window = self._windows[bucket]
+        # Remove entries older than 60 seconds
+        while window and now - window[0] > 60:
+            window.popleft()
+        if len(window) >= limit:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please slow down."},
+                headers={"Retry-After": "60"},
+            )
+        window.append(now)
+        return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Security Headers Middleware
+# ---------------------------------------------------------------------------
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Adds standard security headers to every response."""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
+# ---------------------------------------------------------------------------
+# CORS — restricted to allowed origins from env
+# ---------------------------------------------------------------------------
+_cors_default = "http://localhost:3000,http://localhost:8000"
+cors_origins = os.getenv("CORS_ORIGINS", _cors_default).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in cors_origins],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware)
+# Request timing + X-Request-ID must be outermost so it wraps all other middleware
+app.add_middleware(RequestTimingMiddleware)
 
 # Routers
 from app.api.settings_routes import router as settings_router
@@ -149,6 +228,53 @@ async def health_check():
         "db_connected": db.pool is not None,
         "llm_primary": os.getenv("LLM_PRIMARY_MODEL", "groq/llama-3.1-70b-versatile"),
         "redis_configured": bool(os.getenv("REDIS_URL")),
+    }
+
+
+@app.get("/metrics")
+async def metrics():
+    """
+    Performance metrics endpoint.
+
+    Returns pipeline throughput, average duration, error counts, and
+    process-level memory usage. Sourced entirely from the in-process
+    PerformanceTracker singleton — no external dependency required.
+    """
+    import sys
+
+    uptime_seconds = round(time.monotonic() - _PROCESS_START, 1)
+
+    # Best-effort memory reading via resource module (Unix) or psutil (optional)
+    memory_mb: float = 0.0
+    try:
+        import resource  # Unix only
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        # ru_maxrss is in kilobytes on Linux, bytes on macOS
+        if sys.platform == "darwin":
+            memory_mb = round(usage.ru_maxrss / (1024 * 1024), 2)
+        else:
+            memory_mb = round(usage.ru_maxrss / 1024, 2)
+    except Exception:
+        try:
+            import psutil
+            proc = psutil.Process()
+            memory_mb = round(proc.memory_info().rss / (1024 * 1024), 2)
+        except Exception:
+            memory_mb = 0.0
+
+    snapshot = perf_tracker.get_metrics()
+
+    return {
+        "uptime_seconds": uptime_seconds,
+        "estimates_processed": snapshot["estimates_processed"],
+        "avg_pipeline_duration_ms": snapshot["avg_pipeline_duration_ms"],
+        "error_count": snapshot["error_count"],
+        "memory_usage_mb": memory_mb,
+        # Extended detail (not required by spec but useful for debugging)
+        "slowest_node": snapshot["slowest_node"],
+        "slowest_node_ms": snapshot["slowest_node_ms"],
+        "error_count_by_node": snapshot["error_count_by_node"],
+        "node_avg_durations_ms": snapshot["node_avg_durations_ms"],
     }
 
 
@@ -233,26 +359,40 @@ async def estimate_status(estimate_id: str):
 
 
 @app.post("/api/v1/estimates/{estimate_id}/approve")
-async def approve_estimate(estimate_id: str):
+async def approve_estimate(estimate_id: str, request: Request):
     """
     Approval Gateway — advance estimate from REVIEW_REQUIRED to APPROVED.
     Requires Admin role. Logs approver user_id and timestamp.
     """
     from app.db import AsyncSessionLocal
     from app.models.orm_models import Estimate
-    from app.api.deps import require_admin, get_db
-    from fastapi import Request
+    from fastapi import HTTPException
     from datetime import datetime, timezone
     from sqlalchemy import select
+
+    # Manually enforce admin auth (endpoint is on app, not router)
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = auth_header.split(" ", 1)[1]
+    from jose import jwt, JWTError
+    import os as _os
+    SECRET_KEY = _os.getenv("JWT_SECRET_KEY", "changethis_use_a_real_secret_in_production_64chars")
+    ALGORITHM = _os.getenv("JWT_ALGORITHM", "HS256")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if payload.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+    approver_id = payload.get("sub", "unknown")
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Estimate).where(Estimate.id == estimate_id))
         estimate = result.scalar_one_or_none()
         if not estimate:
-            from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Estimate not found")
         if estimate.status not in ("REVIEW_REQUIRED", "Processing"):
-            from fastapi import HTTPException
             raise HTTPException(
                 status_code=400,
                 detail=f"Estimate status is '{estimate.status}' — can only approve REVIEW_REQUIRED estimates"
@@ -260,28 +400,43 @@ async def approve_estimate(estimate_id: str):
         estimate.status = "APPROVED"
         estimate.approved_at = datetime.now(timezone.utc)
         await session.commit()
-    return {"estimate_id": estimate_id, "status": "APPROVED"}
+    return {"estimate_id": estimate_id, "status": "APPROVED", "approved_by": approver_id}
 
 
 @app.post("/api/v1/estimates/{estimate_id}/dispatch")
-async def dispatch_estimate(estimate_id: str):
+async def dispatch_estimate(estimate_id: str, request: Request):
     """
     Dispatch Gateway — advance estimate from APPROVED to DISPATCHED.
-    Triggers final ZIP generation (report_engine called by Celery).
+    Requires Admin role. Triggers final ZIP generation (report_engine called by Celery).
     """
     from app.db import AsyncSessionLocal
     from app.models.orm_models import Estimate
+    from fastapi import HTTPException
     from datetime import datetime, timezone
     from sqlalchemy import select
+
+    # Manually enforce admin auth (endpoint is on app, not router)
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = auth_header.split(" ", 1)[1]
+    from jose import jwt, JWTError
+    import os as _os
+    SECRET_KEY = _os.getenv("JWT_SECRET_KEY", "changethis_use_a_real_secret_in_production_64chars")
+    ALGORITHM = _os.getenv("JWT_ALGORITHM", "HS256")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if payload.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Estimate).where(Estimate.id == estimate_id))
         estimate = result.scalar_one_or_none()
         if not estimate:
-            from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Estimate not found")
         if estimate.status != "APPROVED":
-            from fastapi import HTTPException
             raise HTTPException(
                 status_code=400,
                 detail=f"Estimate must be APPROVED before dispatching (current: '{estimate.status}')"

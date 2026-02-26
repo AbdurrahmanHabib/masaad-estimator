@@ -1,5 +1,11 @@
-"""JWT Authentication routes — register, login, me."""
+"""
+JWT Authentication routes — register, login, me.
+
+Rate limiting for these endpoints is enforced at the middleware level
+(RateLimitMiddleware in main.py): 5 requests per minute per IP.
+"""
 import os
+import re
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -9,6 +15,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.db import get_db
 from app.models.orm_models import User, Role, Tenant
+
+# Simple RFC-5322 subset email regex (no external library required)
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+_MIN_PASSWORD_LEN = 8
+
+
+def _validate_email(email: str) -> str:
+    """Validate email format. Raises HTTPException 422 on failure."""
+    email = email.strip().lower()
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=422, detail="Invalid email format")
+    return email
+
+
+def _validate_password(password: str) -> None:
+    """Enforce minimum password length. Raises HTTPException 422 on failure."""
+    if len(password) < _MIN_PASSWORD_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Password must be at least {_MIN_PASSWORD_LEN} characters"
+        )
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -50,6 +77,10 @@ def create_access_token(data: dict) -> str:
 
 @router.post("/register", response_model=TokenResponse)
 async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    # Input validation
+    req.email = _validate_email(req.email)
+    _validate_password(req.password)
+
     result = await db.execute(select(User).where(User.email == req.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -95,6 +126,12 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
+    # Input validation — reject obviously malformed requests before hitting the DB
+    req.email = _validate_email(req.email)
+    if len(req.password) < _MIN_PASSWORD_LEN:
+        # Return the same error as a bad login to avoid confirming account existence
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
     result = await db.execute(select(User).where(User.email == req.email))
     user = result.scalar_one_or_none()
     if not user or not pwd_context.verify(req.password, user.hashed_password):
