@@ -71,6 +71,24 @@ async def init_db():
                 except Exception:
                     pass  # Column already exists or table not yet created
 
+        # Run seed data SQL (idempotent — all INSERTs use ON CONFLICT)
+        seed_path = os.path.join(os.path.dirname(__file__), "seed_data.sql")
+        if os.path.exists(seed_path):
+            try:
+                with open(seed_path, "r") as f:
+                    seed_sql = f.read()
+                # Execute each statement separately (split on semicolons)
+                for stmt in seed_sql.split(";"):
+                    stmt = stmt.strip()
+                    if stmt and not stmt.startswith("--"):
+                        try:
+                            await conn.execute(__import__('sqlalchemy').text(stmt))
+                        except Exception as seed_err:
+                            logger.debug("Seed statement skipped: %s", seed_err)
+                logger.info("Seed data applied.")
+            except Exception as seed_err:
+                logger.warning("Seed data failed: %s", seed_err)
+
         logger.info("Database tables initialized.")
     except Exception as e:
         logger.warning(f"init_db skipped (DB not available): {e}")

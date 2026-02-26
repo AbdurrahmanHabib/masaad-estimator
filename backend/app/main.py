@@ -11,10 +11,8 @@ import time
 import collections
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from app.services.logging_config import setup_logging
-from app.services.middleware import RequestTimingMiddleware
 from app.services.perf_monitor import tracker as perf_tracker
 
 # Load .env file automatically in dev (no-op if python-dotenv not installed or file missing)
@@ -141,116 +139,37 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# Rate Limiting Middleware
-# ---------------------------------------------------------------------------
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """
-    In-memory sliding-window rate limiter.
-    Buckets:
-      - /api/auth/login, /api/auth/register : 5 req/min per IP
-      - file upload endpoints (multipart)   : 10 req/min per IP
-      - everything else                     : 60 req/min per IP
-    """
-    def __init__(self, app):
-        super().__init__(app)
-        # {bucket_key: deque of timestamps}
-        self._windows: dict = collections.defaultdict(collections.deque)
-
-    def _get_limit(self, path: str) -> int:
-        if path in ("/api/auth/login", "/api/auth/register"):
-            return 5
-        if path.startswith("/api/ingestion/upload") or "upload" in path:
-            return 10
-        return 60
-
-    async def dispatch(self, request: Request, call_next):
-        ip = request.client.host if request.client else "unknown"
-        path = request.url.path
-        limit = self._get_limit(path)
-        bucket = f"{ip}:{path if limit <= 10 else 'general'}"
-        now = time.monotonic()
-        window = self._windows[bucket]
-        # Remove entries older than 60 seconds
-        while window and now - window[0] > 60:
-            window.popleft()
-        if len(window) >= limit:
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Too many requests. Please slow down."},
-                headers={"Retry-After": "60"},
-            )
-        window.append(now)
-        return await call_next(request)
-
-
-# ---------------------------------------------------------------------------
-# Security Headers Middleware
-# ---------------------------------------------------------------------------
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Adds standard security headers to every response."""
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        # No CSP on API responses — frontend is on a different origin (Railway subdomain)
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        return response
-
-
-# ---------------------------------------------------------------------------
-# CORS — restricted to allowed origins from env; auto-adds Railway domains
+# CORS — Only CORSMiddleware, no BaseHTTPMiddleware subclasses.
+# BaseHTTPMiddleware is known to break CORSMiddleware in Starlette by
+# swallowing exceptions before CORS headers can be added to responses.
 # ---------------------------------------------------------------------------
 _cors_default = "http://localhost:3000,http://localhost:8000"
 cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", _cors_default).split(",") if o.strip()]
-# Auto-add Railway public domain if deployed on Railway
+
+# Auto-add Railway domains
 _railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 if _railway_domain:
     cors_origins.append(f"https://{_railway_domain}")
-# Auto-add Railway static domain patterns (e.g. *.up.railway.app)
 _railway_static = os.getenv("RAILWAY_STATIC_URL", "")
 if _railway_static:
     cors_origins.append(_railway_static.rstrip("/"))
-
-# Explicitly add FRONTEND_URL if set (primary way to whitelist frontend origin)
 _frontend_url = os.getenv("FRONTEND_URL", "")
 if _frontend_url:
     cors_origins.append(_frontend_url.rstrip("/"))
 
-# On Railway, allow all *.up.railway.app origins (frontend + backend may have different subdomains)
-_allow_origin_regex = None
-if os.getenv("RAILWAY_ENVIRONMENT_NAME") or _railway_domain:
-    _allow_origin_regex = r"https://.*\.up\.railway\.app"
+# Always allow all *.up.railway.app subdomains when deployed
+_allow_origin_regex = r"https://.*\.up\.railway\.app"
 
 logger.info("CORS origins: %s | regex: %s", cors_origins, _allow_origin_regex)
 
-# Middleware order: last-added = outermost (first to process incoming requests).
-# CORSMiddleware MUST be outermost so preflight OPTIONS gets CORS headers
-# before any other middleware can reject the request.
-app.add_middleware(RateLimitMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
     allow_origin_regex=_allow_origin_regex,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-
-# ---------------------------------------------------------------------------
-# Global exception handler — ensures CORS headers appear even on 500 errors.
-# Without this, unhandled exceptions bypass CORSMiddleware response processing.
-# ---------------------------------------------------------------------------
-@app.exception_handler(Exception)
-async def _global_exception_handler(request: Request, exc: Exception):
-    logger.error("Unhandled exception on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"},
-    )
 
 # Routers
 from app.api.settings_routes import router as settings_router
