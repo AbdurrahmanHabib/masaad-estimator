@@ -399,6 +399,67 @@ async def estimate_status(estimate_id: str):
         return {"estimate_id": estimate_id, "status": "unknown", "error": str(e)}
 
 
+@app.get("/api/v1/estimates/{estimate_id}")
+async def get_estimate_v1(estimate_id: str, request: Request):
+    """
+    Alias for /api/ingestion/estimate/{estimate_id}.
+    Used by the approve page and other v1 API consumers.
+    Proxies to the ingestion route's get_estimate endpoint.
+    """
+    from app.db import AsyncSessionLocal
+    from app.models.orm_models import Estimate, Project
+    from fastapi import HTTPException
+    from sqlalchemy import select
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Estimate).where(Estimate.id == estimate_id))
+            estimate = result.scalar_one_or_none()
+            if not estimate:
+                raise HTTPException(status_code=404, detail="Estimate not found")
+
+            # Join with Project
+            project_name = ""
+            project_location = ""
+            proj_result = await session.execute(select(Project).where(Project.id == estimate.project_id))
+            project = proj_result.scalar_one_or_none()
+            if project:
+                project_name = project.name or ""
+                project_location = project.location_zone or ""
+
+            bom = estimate.bom_output_json or {}
+            state_snap = estimate.state_snapshot or {}
+
+            return {
+                "id": str(estimate.id),
+                "estimate_id": str(estimate.id),
+                "project_id": str(estimate.project_id),
+                "project_name": project_name,
+                "location": project_location,
+                "status": estimate.status,
+                "progress_pct": estimate.progress_pct,
+                "current_step": estimate.current_step,
+                "approved_by": state_snap.get("approved_by"),
+                "approved_at": estimate.approved_at.isoformat() if hasattr(estimate, 'approved_at') and estimate.approved_at else None,
+                "reasoning_log": estimate.reasoning_log or [],
+                "project_scope": estimate.project_scope_json or {},
+                "opening_schedule": estimate.opening_schedule_json or {},
+                "bom_output": bom,
+                "cutting_list": estimate.cutting_list_json or {},
+                "state_snapshot": state_snap,
+                "boq": {
+                    "summary": bom.get("summary", {}),
+                    "line_items": bom.get("items", []),
+                    "financial_rates": bom.get("financial_rates", {}),
+                },
+                "financial_summary": bom.get("summary", estimate.financial_json or {}),
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/v1/estimates/{estimate_id}/approve")
 async def approve_estimate(estimate_id: str, request: Request):
     """

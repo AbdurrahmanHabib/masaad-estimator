@@ -524,7 +524,10 @@ async def _bom_impl(state: GraphState) -> GraphState:
     except Exception as e:
         logger.warning(f"[{estimate_id}] Cutting list failed: {e}")
 
+    # Generate financial summary from BOM
+    bom_summary = engine.generate_summary(bom_items)
     state["bom_items"] = bom_items
+    state["bom_summary"] = bom_summary
     state["cutting_list"] = cutting_list
 
     total_cost = sum(item.get("subtotal_aed", 0) for item in bom_items if not item.get("is_attic_stock"))

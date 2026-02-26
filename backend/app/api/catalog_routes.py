@@ -81,15 +81,36 @@ async def upload_catalog_preview(
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files accepted")
 
-    contents = await file.read()
+    try:
+        contents = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read uploaded file: {e}")
+
     if len(contents) > 50 * 1024 * 1024:  # 50 MB limit
         raise HTTPException(status_code=400, detail="File too large (max 50MB)")
 
+    if len(contents) < 100:
+        raise HTTPException(status_code=400, detail="File appears empty or corrupted (too small)")
+
+    # Verify it's actually a PDF (check magic bytes %PDF)
+    if not contents[:10].startswith(b'%PDF'):
+        raise HTTPException(
+            status_code=400,
+            detail="File does not appear to be a valid PDF (missing %PDF header)"
+        )
+
     try:
-        import asyncio
         entries = await _PARSER.parse(contents, source_name=file.filename)
     except Exception as e:
+        logger.error(f"PDF parsing failed for {file.filename}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"PDF parsing failed: {e}")
+
+    if not entries:
+        raise HTTPException(
+            status_code=422,
+            detail="No catalog entries could be extracted from this PDF. "
+                   "The file may be scanned/image-only or contain no recognizable catalog data."
+        )
 
     previews = [
         CatalogEntryPreview(

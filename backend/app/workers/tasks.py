@@ -160,7 +160,8 @@ def run_full_pipeline(self, estimate_id: str, user_id: str):
                     estimate.progress_pct = final_state.get("progress_pct", 100)
                     estimate.state_snapshot = dict(final_state)
                     estimate.bom_output_json = {
-                        "items": final_state.get("bom_items", [])
+                        "items": final_state.get("bom_items", []),
+                        "summary": final_state.get("bom_summary", {}),
                     }
                     if final_state.get("bom_items"):
                         estimate.bom_snapshot_json = {

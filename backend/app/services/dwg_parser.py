@@ -1,70 +1,871 @@
+"""
+Resilient DWG/DXF Parser for Facade Estimation
+
+Handles messy real-world files:
+- Multiple overlapping drawings in one file
+- Entities across model space + all paper space layouts
+- No consistent layering or naming
+- Large files (10MB+)
+- Spatial clustering to group separate drawings
+
+Dependencies:
+  - ezdxf (required, v1.1.0)
+  - ODA File Converter (optional, for .dwg → .dxf conversion)
+
+Returns structured data with panels, openings, text annotations, blocks, warnings.
+"""
 import os
+import re
+import math
+import shutil
+import logging
+import tempfile
 import subprocess
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Optional
+
 import ezdxf
-from ezdxf.math import BoundingBox
-from shapely.geometry import Polygon, MultiPolygon
-from typing import List, Dict, Any
+from ezdxf.math import BoundingBox, Vec3
+
+logger = logging.getLogger("masaad-dwg-parser")
+
+# ── Configuration ────────────────────────────────────────────────────────────
+
+# ODA File Converter path — set via environment variable or auto-detect
+ODA_CONVERTER_PATH = os.getenv("ODA_CONVERTER_PATH", "")
+
+# Spatial clustering: entities within this distance (mm) are grouped
+CLUSTER_DISTANCE_MM = 500.0
+
+# Minimum dimensions for a valid panel (mm)
+MIN_PANEL_DIM_MM = 100.0
+MAX_PANEL_DIM_MM = 15000.0
+
+# Dimension patterns in text annotations
+_DIM_PATTERNS = [
+    # "1200x2400", "1200X2400", "1200 x 2400"
+    re.compile(r'(\d{2,5})\s*[xX×]\s*(\d{2,5})'),
+    # "W=1200 H=2400", "W1200 H2400"
+    re.compile(r'[Ww]\s*=?\s*(\d{2,5})\s+[Hh]\s*=?\s*(\d{2,5})'),
+    # "1200mm x 2400mm"
+    re.compile(r'(\d{2,5})\s*mm\s*[xX×]\s*(\d{2,5})\s*mm'),
+    # "WIDTH: 1200  HEIGHT: 2400"
+    re.compile(r'WIDTH\s*:?\s*(\d{2,5})\s+HEIGHT\s*:?\s*(\d{2,5})', re.IGNORECASE),
+]
+
+# Window/door block name patterns
+_WINDOW_PATTERNS = re.compile(r'(?i)(window|win|W\d|WN\d|casement|awning|sliding|fixed)', re.IGNORECASE)
+_DOOR_PATTERNS = re.compile(r'(?i)(door|dr|D\d|DN\d|entrance|swing|revolving)', re.IGNORECASE)
+
+# Facade-relevant keywords in text annotations
+_FACADE_KEYWORDS = re.compile(
+    r'(?i)(glass|glazing|alumin|mullion|transom|ACP|cladding|curtain.?wall|'
+    r'spandrel|panel|sealant|silicone|thermal.?break|double.?glaz|DGU|'
+    r'tempered|laminated|low.?e|tinted|clear|float|IGU|spider|'
+    r'bracket|anchor|fixing|profile\s*\d|series\s*\d)',
+    re.IGNORECASE,
+)
+
+
+# ── Data classes ──────────────────────────────────────────────────────────────
+
+@dataclass
+class BoundsInfo:
+    min_x: float = 0.0
+    min_y: float = 0.0
+    max_x: float = 0.0
+    max_y: float = 0.0
+
+    @property
+    def width(self) -> float:
+        return abs(self.max_x - self.min_x)
+
+    @property
+    def height(self) -> float:
+        return abs(self.max_y - self.min_y)
+
+    def to_dict(self) -> dict:
+        return {
+            "min_x": round(self.min_x, 2),
+            "min_y": round(self.min_y, 2),
+            "max_x": round(self.max_x, 2),
+            "max_y": round(self.max_y, 2),
+            "width": round(self.width, 2),
+            "height": round(self.height, 2),
+        }
+
+
+@dataclass
+class PanelInfo:
+    width_mm: float
+    height_mm: float
+    area_sqm: float
+    count: int = 1
+    source: str = ""  # "geometry" or "text_annotation"
+    layer: str = ""
+
+
+@dataclass
+class OpeningInfo:
+    type: str  # "window", "door", "opening"
+    width_mm: float
+    height_mm: float
+    area_sqm: float
+    block_name: str = ""
+    count: int = 1
+    layer: str = ""
+
+
+@dataclass
+class BlockInfo:
+    name: str
+    count: int
+    bounds: Optional[BoundsInfo] = None
+    block_type: str = ""  # "window", "door", "generic"
+
+
+@dataclass
+class LayoutInfo:
+    name: str
+    entity_count: int
+    bounds: Optional[BoundsInfo] = None
+
+
+@dataclass
+class ParseResult:
+    layouts: list
+    panels: list
+    openings: list
+    text_annotations: list
+    blocks: list
+    total_facade_area_sqm: float
+    warnings: list
+    metadata: dict
+
+
+# ── DWG → DXF Conversion ─────────────────────────────────────────────────────
+
+def _find_oda_converter() -> str | None:
+    """Attempt to locate ODA File Converter on disk."""
+    if ODA_CONVERTER_PATH and os.path.isfile(ODA_CONVERTER_PATH):
+        return ODA_CONVERTER_PATH
+
+    # Common install paths
+    candidates = [
+        r"C:\Program Files\ODA\ODAFileConverter\ODAFileConverter.exe",
+        r"C:\Program Files (x86)\ODA\ODAFileConverter\ODAFileConverter.exe",
+        "/usr/bin/ODAFileConverter",
+        "/usr/local/bin/ODAFileConverter",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+
+    # Check if it's on PATH
+    which = shutil.which("ODAFileConverter")
+    if which:
+        return which
+
+    return None
+
+
+def convert_dwg_to_dxf(input_path: str) -> str:
+    """
+    Convert a .dwg file to .dxf using ODA File Converter.
+    Returns path to the generated .dxf file.
+    Raises RuntimeError if ODA is not available.
+    """
+    oda = _find_oda_converter()
+    if not oda:
+        raise RuntimeError(
+            "ODA File Converter not found. "
+            "Install from https://www.opendesign.com/guestfiles/oda_file_converter "
+            "or set the ODA_CONVERTER_PATH environment variable."
+        )
+
+    input_dir = os.path.dirname(os.path.abspath(input_path))
+    output_dir = tempfile.mkdtemp(prefix="masaad_dwg_")
+    basename = os.path.basename(input_path)
+    dxf_name = os.path.splitext(basename)[0] + ".dxf"
+
+    try:
+        result = subprocess.run(
+            [oda, input_dir, output_dir, "ACAD2018", "DXF", "0", "1", basename],
+            capture_output=True,
+            timeout=120,
+        )
+        dxf_path = os.path.join(output_dir, dxf_name)
+        if os.path.isfile(dxf_path):
+            return dxf_path
+        # ODA may have changed the filename slightly
+        for f in os.listdir(output_dir):
+            if f.lower().endswith('.dxf'):
+                return os.path.join(output_dir, f)
+        raise RuntimeError(
+            f"ODA conversion produced no .dxf output. "
+            f"Exit code: {result.returncode}, stderr: {result.stderr.decode(errors='replace')[:500]}"
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("ODA File Converter timed out (120s limit)")
+
+
+# ── Entity extraction helpers ─────────────────────────────────────────────────
+
+def _safe_bounds(entity) -> Optional[BoundsInfo]:
+    """Safely compute bounding box for any entity."""
+    try:
+        bbox = BoundingBox()
+        # For INSERT entities, we need to handle differently
+        if hasattr(entity, 'virtual_entities'):
+            try:
+                for ve in entity.virtual_entities():
+                    bbox.extend(ve.control_points() if hasattr(ve, 'control_points') else [])
+            except Exception:
+                pass
+        # Generic approach
+        if bbox.is_empty:
+            if hasattr(entity, 'dxf') and hasattr(entity.dxf, 'insert'):
+                # INSERT entity — use insert point as center
+                ins = entity.dxf.insert
+                return BoundsInfo(ins.x, ins.y, ins.x, ins.y)
+            points = []
+            try:
+                if entity.dxftype() == 'LINE':
+                    points = [entity.dxf.start, entity.dxf.end]
+                elif entity.dxftype() == 'CIRCLE':
+                    c = entity.dxf.center
+                    r = entity.dxf.radius
+                    return BoundsInfo(c.x - r, c.y - r, c.x + r, c.y + r)
+                elif entity.dxftype() == 'ARC':
+                    c = entity.dxf.center
+                    r = entity.dxf.radius
+                    return BoundsInfo(c.x - r, c.y - r, c.x + r, c.y + r)
+                elif entity.dxftype() in ('LWPOLYLINE', 'POLYLINE'):
+                    if hasattr(entity, 'get_points'):
+                        points = [Vec3(p[0], p[1], 0) for p in entity.get_points()]
+                    elif hasattr(entity, 'vertices'):
+                        points = [Vec3(v.dxf.location.x, v.dxf.location.y, 0) for v in entity.vertices]
+                elif entity.dxftype() == 'POINT':
+                    loc = entity.dxf.location
+                    return BoundsInfo(loc.x, loc.y, loc.x, loc.y)
+                elif entity.dxftype() == 'SOLID' or entity.dxftype() == '3DSOLID':
+                    pass  # Skip complex solids
+                elif entity.dxftype() in ('TEXT', 'MTEXT'):
+                    ins = entity.dxf.insert if hasattr(entity.dxf, 'insert') else None
+                    if ins:
+                        return BoundsInfo(ins.x, ins.y, ins.x, ins.y)
+                elif entity.dxftype() == 'SPLINE':
+                    if hasattr(entity, 'control_points'):
+                        points = list(entity.control_points)
+                    elif hasattr(entity, 'fit_points'):
+                        points = list(entity.fit_points)
+                elif entity.dxftype() == 'ELLIPSE':
+                    c = entity.dxf.center
+                    # Approximate bounds
+                    major = entity.dxf.major_axis
+                    r = max(abs(major.x), abs(major.y), 1)
+                    return BoundsInfo(c.x - r, c.y - r, c.x + r, c.y + r)
+            except Exception:
+                pass
+
+            if points:
+                xs = [p.x for p in points if hasattr(p, 'x')]
+                ys = [p.y for p in points if hasattr(p, 'y')]
+                if xs and ys:
+                    return BoundsInfo(min(xs), min(ys), max(xs), max(ys))
+        else:
+            ext_min = bbox.extmin
+            ext_max = bbox.extmax
+            return BoundsInfo(ext_min.x, ext_min.y, ext_max.x, ext_max.y)
+    except Exception:
+        pass
+    return None
+
+
+def _extract_text(entity) -> str:
+    """Extract text content from TEXT or MTEXT entity."""
+    try:
+        if entity.dxftype() == 'TEXT':
+            return entity.dxf.text.strip()
+        elif entity.dxftype() == 'MTEXT':
+            # MTEXT can have formatting codes — strip them
+            raw = entity.text if hasattr(entity, 'text') else entity.dxf.text
+            # Remove MTEXT formatting: {\fArial;...} etc.
+            cleaned = re.sub(r'\\[A-Za-z][^;]*;', '', str(raw))
+            cleaned = re.sub(r'[{}]', '', cleaned)
+            cleaned = re.sub(r'\\P', '\n', cleaned)  # paragraph break
+            cleaned = re.sub(r'\\[A-Za-z]', '', cleaned)
+            return cleaned.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_dimensions_from_text(text: str) -> list[tuple[float, float]]:
+    """
+    Extract width x height dimensions from text string.
+    Returns list of (width_mm, height_mm) tuples.
+    """
+    results = []
+    for pattern in _DIM_PATTERNS:
+        for match in pattern.finditer(text):
+            try:
+                w = float(match.group(1))
+                h = float(match.group(2))
+                if MIN_PANEL_DIM_MM <= w <= MAX_PANEL_DIM_MM and MIN_PANEL_DIM_MM <= h <= MAX_PANEL_DIM_MM:
+                    results.append((w, h))
+            except (ValueError, IndexError):
+                continue
+    return results
+
+
+def _rect_from_polyline(entity) -> Optional[tuple[float, float]]:
+    """
+    If a closed polyline/lwpolyline is rectangular, return (width, height) in drawing units.
+    """
+    try:
+        if entity.dxftype() == 'LWPOLYLINE':
+            pts = list(entity.get_points(format='xy'))
+        elif entity.dxftype() == 'POLYLINE':
+            pts = [(v.dxf.location.x, v.dxf.location.y) for v in entity.vertices]
+        else:
+            return None
+
+        # Remove duplicate closing point
+        if len(pts) >= 4 and pts[0] == pts[-1]:
+            pts = pts[:-1]
+
+        if len(pts) != 4:
+            return None
+
+        # Check if it's a rectangle: all angles should be ~90 degrees
+        # Compute edge lengths
+        edges = []
+        for i in range(4):
+            dx = pts[(i + 1) % 4][0] - pts[i][0]
+            dy = pts[(i + 1) % 4][1] - pts[i][1]
+            length = math.sqrt(dx * dx + dy * dy)
+            edges.append(length)
+
+        # A rectangle has opposite sides equal
+        if not (abs(edges[0] - edges[2]) / max(edges[0], edges[2], 0.001) < 0.05 and
+                abs(edges[1] - edges[3]) / max(edges[1], edges[3], 0.001) < 0.05):
+            return None
+
+        # Check right angles via dot product
+        for i in range(4):
+            ax = pts[(i + 1) % 4][0] - pts[i][0]
+            ay = pts[(i + 1) % 4][1] - pts[i][1]
+            bx = pts[(i + 2) % 4][0] - pts[(i + 1) % 4][0]
+            by = pts[(i + 2) % 4][1] - pts[(i + 1) % 4][1]
+            dot = ax * bx + ay * by
+            len_a = math.sqrt(ax * ax + ay * ay)
+            len_b = math.sqrt(bx * bx + by * by)
+            if len_a > 0 and len_b > 0:
+                cos_angle = abs(dot / (len_a * len_b))
+                if cos_angle > 0.1:  # not perpendicular
+                    return None
+
+        w = max(edges[0], edges[1])
+        h = min(edges[0], edges[1])
+        if w < 1 or h < 1:
+            return None
+        return (w, h)
+    except Exception:
+        return None
+
+
+# ── Spatial clustering ────────────────────────────────────────────────────────
+
+def _cluster_entities(
+    entity_bounds: list[tuple[int, BoundsInfo]],
+    max_distance: float,
+) -> list[list[int]]:
+    """
+    Simple grid-based spatial clustering of entities by proximity.
+    Returns list of clusters, each being a list of entity indices.
+    """
+    if not entity_bounds:
+        return []
+
+    # Use a grid approach for efficiency
+    cell_size = max_distance
+    grid: dict[tuple[int, int], list[int]] = defaultdict(list)
+
+    for idx, (orig_idx, b) in enumerate(entity_bounds):
+        cx = (b.min_x + b.max_x) / 2
+        cy = (b.min_y + b.max_y) / 2
+        gx = int(cx / cell_size)
+        gy = int(cy / cell_size)
+        grid[(gx, gy)].append(orig_idx)
+
+    # Merge adjacent grid cells into clusters
+    visited = set()
+    clusters = []
+
+    for cell_key, indices in grid.items():
+        if cell_key in visited:
+            continue
+        # BFS to find connected cells
+        cluster = []
+        queue = [cell_key]
+        while queue:
+            ck = queue.pop(0)
+            if ck in visited:
+                continue
+            visited.add(ck)
+            if ck in grid:
+                cluster.extend(grid[ck])
+                # Check 8 neighbors
+                gx, gy = ck
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        nk = (gx + dx, gy + dy)
+                        if nk not in visited and nk in grid:
+                            queue.append(nk)
+        if cluster:
+            clusters.append(cluster)
+
+    return clusters
+
+
+# ── Main parser class ─────────────────────────────────────────────────────────
 
 class DWGParserService:
-    def __init__(self, oda_converter_path: str):
-        self.oda_path = oda_converter_path
+    """
+    Resilient DWG/DXF parser for facade estimation.
 
-    def convert_dwg_to_dxf(self, input_path: str, output_dir: str) -> str:
-        filename = os.path.basename(input_path)
-        dxf_filename = filename.replace(".dwg", ".dxf")
-        input_dir = os.path.dirname(input_path)
-        
+    Handles:
+    - .dwg files (via ODA File Converter) and .dxf files (native ezdxf)
+    - Model space + all paper space layouts
+    - Spatial clustering of overlapping drawings
+    - Dimension extraction from text annotations
+    - Block detection for windows/doors
+    - Fault tolerance (never crashes on bad data)
+    """
+
+    def __init__(self, oda_converter_path: str = ""):
+        """
+        Args:
+            oda_converter_path: Path to ODA File Converter executable.
+                                If empty, will auto-detect or skip DWG conversion.
+        """
+        if oda_converter_path:
+            global ODA_CONVERTER_PATH
+            ODA_CONVERTER_PATH = oda_converter_path
+
+    def parse_file(self, file_path: str) -> dict:
+        """
+        Parse a .dwg or .dxf file and return structured facade data.
+
+        Args:
+            file_path: Path to the .dwg or .dxf file.
+
+        Returns:
+            Dict with keys: layouts, panels, openings, text_annotations,
+            blocks, total_facade_area_sqm, warnings, metadata
+        """
+        warnings: list[str] = []
+        ext = os.path.splitext(file_path)[1].lower()
+
+        # Validate file exists
+        if not os.path.isfile(file_path):
+            return self._empty_result(warnings=["File not found: " + file_path])
+
+        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+
+        # Convert DWG to DXF if needed
+        dxf_path = file_path
+        if ext == '.dwg':
+            try:
+                dxf_path = convert_dwg_to_dxf(file_path)
+                logger.info(f"DWG converted to DXF: {dxf_path}")
+            except RuntimeError as e:
+                warnings.append(str(e))
+                return self._empty_result(warnings=warnings)
+            except Exception as e:
+                warnings.append(f"DWG conversion failed unexpectedly: {e}")
+                return self._empty_result(warnings=warnings)
+        elif ext != '.dxf':
+            warnings.append(f"Unsupported file format: {ext}. Expected .dwg or .dxf")
+            return self._empty_result(warnings=warnings)
+
+        # Parse DXF
         try:
-            subprocess.run([
-                self.oda_path, input_dir, output_dir, 
-                "ACAD2018", "DXF", "0", "1"
-            ], check=True, capture_output=True)
-            return os.path.join(output_dir, dxf_filename)
-        except subprocess.CalledProcessError as e:
-            raise Exception(f"ODA Conversion Failed: {e.stderr.decode()}")
+            doc = ezdxf.readfile(dxf_path)
+        except Exception as e:
+            warnings.append(f"Failed to read DXF file: {e}")
+            return self._empty_result(warnings=warnings)
 
-    def extract_geometry(self, dxf_path: str) -> Dict[str, Any]:
-        doc = ezdxf.readfile(dxf_path)
-        msp = doc.modelspace()
-        layers_data = {}
+        return self._extract_from_doc(doc, warnings, file_size_mb)
 
-        for insert in msp.query('INSERT'):
-            layer = insert.dxf.layer
-            if layer not in layers_data: layers_data[layer] = {"blocks": [], "areas": []}
-            block = doc.blocks.get(insert.dxf.name)
-            bbox = BoundingBox(block.query('LINE LWPOLYLINE CIRCLE HATCH'))
-            layers_data[layer]["blocks"].append({
-                "name": insert.dxf.name,
-                "position": (insert.dxf.insert.x, insert.dxf.insert.y),
-                "width": bbox.size.x * insert.dxf.xscale,
-                "height": bbox.size.y * insert.dxf.yscale,
-                "rotation": insert.dxf.rotation
+    def parse_bytes(self, data: bytes, filename: str = "upload.dxf") -> dict:
+        """
+        Parse DXF content from bytes (for API upload handling).
+
+        Args:
+            data: Raw file bytes.
+            filename: Original filename (used to detect .dwg vs .dxf).
+
+        Returns:
+            Same structured dict as parse_file().
+        """
+        warnings: list[str] = []
+        ext = os.path.splitext(filename)[1].lower()
+        file_size_mb = len(data) / (1024 * 1024)
+
+        # Write to temp file
+        suffix = ext if ext in ('.dwg', '.dxf') else '.dxf'
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        tmp.write(data)
+        tmp.close()
+
+        try:
+            if ext == '.dwg':
+                try:
+                    dxf_path = convert_dwg_to_dxf(tmp.name)
+                except RuntimeError as e:
+                    warnings.append(str(e))
+                    return self._empty_result(warnings=warnings)
+            else:
+                dxf_path = tmp.name
+
+            try:
+                doc = ezdxf.readfile(dxf_path)
+            except Exception as e:
+                warnings.append(f"Failed to read DXF: {e}")
+                return self._empty_result(warnings=warnings)
+
+            return self._extract_from_doc(doc, warnings, file_size_mb)
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+
+    def _extract_from_doc(self, doc, warnings: list[str], file_size_mb: float) -> dict:
+        """Core extraction from an ezdxf Document object."""
+        layouts_info = []
+        all_panels: list[PanelInfo] = []
+        all_openings: list[OpeningInfo] = []
+        all_text_annotations: list[str] = []
+        all_blocks: dict[str, BlockInfo] = {}
+        entity_bounds_for_clustering: list[tuple[int, BoundsInfo]] = []
+        entity_idx = 0
+
+        # ── Process each layout (model space + all paper space layouts) ────────
+        try:
+            layout_names = [layout.name for layout in doc.layouts]
+        except Exception:
+            layout_names = ["Model"]
+            warnings.append("Could not enumerate layouts, processing Model space only")
+
+        for layout_name in layout_names:
+            try:
+                layout = doc.layouts.get(layout_name)
+            except Exception:
+                warnings.append(f"Could not access layout: {layout_name}")
+                continue
+
+            if layout is None:
+                continue
+
+            layout_entity_count = 0
+            layout_bbox = BoundingBox()
+
+            try:
+                entities = list(layout)
+            except Exception as e:
+                warnings.append(f"Error iterating layout {layout_name}: {e}")
+                continue
+
+            for entity in entities:
+                try:
+                    layout_entity_count += 1
+                    dxf_type = entity.dxftype()
+
+                    # Compute bounds for clustering
+                    eb = _safe_bounds(entity)
+                    if eb:
+                        entity_bounds_for_clustering.append((entity_idx, eb))
+                        try:
+                            layout_bbox.extend([
+                                Vec3(eb.min_x, eb.min_y, 0),
+                                Vec3(eb.max_x, eb.max_y, 0),
+                            ])
+                        except Exception:
+                            pass
+
+                    # ── Lines ──────────────────────────────────────────────
+                    if dxf_type == 'LINE':
+                        # Lines are tracked via bounds for panel detection
+                        pass
+
+                    # ── Polylines / LWPolylines → panel rectangles ────────
+                    elif dxf_type in ('LWPOLYLINE', 'POLYLINE'):
+                        rect = _rect_from_polyline(entity)
+                        if rect:
+                            w, h = rect
+                            if MIN_PANEL_DIM_MM <= w <= MAX_PANEL_DIM_MM and MIN_PANEL_DIM_MM <= h <= MAX_PANEL_DIM_MM:
+                                layer = entity.dxf.layer if hasattr(entity.dxf, 'layer') else ""
+                                all_panels.append(PanelInfo(
+                                    width_mm=round(max(w, h), 1),
+                                    height_mm=round(min(w, h), 1),
+                                    area_sqm=round(w * h / 1e6, 4),
+                                    source="geometry",
+                                    layer=layer,
+                                ))
+
+                    # ── Circles → holes, fixings ──────────────────────────
+                    elif dxf_type == 'CIRCLE':
+                        pass  # Tracked in bounds; could be analyzed for fixing patterns
+
+                    # ── Text / MText → annotations, dimension specs ───────
+                    elif dxf_type in ('TEXT', 'MTEXT'):
+                        txt = _extract_text(entity)
+                        if txt:
+                            # Check for facade-relevant keywords
+                            if _FACADE_KEYWORDS.search(txt):
+                                all_text_annotations.append(txt)
+                            # Check for dimension patterns
+                            dims = _extract_dimensions_from_text(txt)
+                            for w, h in dims:
+                                layer = entity.dxf.layer if hasattr(entity.dxf, 'layer') else ""
+                                all_panels.append(PanelInfo(
+                                    width_mm=round(max(w, h), 1),
+                                    height_mm=round(min(w, h), 1),
+                                    area_sqm=round(w * h / 1e6, 4),
+                                    source="text_annotation",
+                                    layer=layer,
+                                ))
+                            # Also store raw dimension text
+                            if dims or any(c.isdigit() for c in txt):
+                                if txt not in all_text_annotations:
+                                    all_text_annotations.append(txt)
+
+                    # ── DIMENSION entities ────────────────────────────────
+                    elif dxf_type == 'DIMENSION':
+                        try:
+                            # Try to get the measurement value
+                            if hasattr(entity.dxf, 'text') and entity.dxf.text:
+                                txt = entity.dxf.text.strip()
+                                if txt and txt not in all_text_annotations:
+                                    all_text_annotations.append(txt)
+                            # Also try the actual_measurement
+                            if hasattr(entity, 'get_measurement'):
+                                meas = entity.get_measurement()
+                                if meas and meas > 0:
+                                    meas_str = f"{meas:.1f}mm"
+                                    if meas_str not in all_text_annotations:
+                                        all_text_annotations.append(meas_str)
+                        except Exception:
+                            pass
+
+                    # ── INSERT (block references) → windows, doors ────────
+                    elif dxf_type == 'INSERT':
+                        try:
+                            block_name = entity.dxf.name
+                            layer = entity.dxf.layer if hasattr(entity.dxf, 'layer') else ""
+
+                            if block_name not in all_blocks:
+                                # Determine block type
+                                block_type = "generic"
+                                if _WINDOW_PATTERNS.search(block_name) or _WINDOW_PATTERNS.search(layer):
+                                    block_type = "window"
+                                elif _DOOR_PATTERNS.search(block_name) or _DOOR_PATTERNS.search(layer):
+                                    block_type = "door"
+
+                                block_bounds = None
+                                try:
+                                    block_def = doc.blocks.get(block_name)
+                                    if block_def:
+                                        bb = BoundingBox()
+                                        for bent in block_def:
+                                            b = _safe_bounds(bent)
+                                            if b:
+                                                bb.extend([Vec3(b.min_x, b.min_y, 0), Vec3(b.max_x, b.max_y, 0)])
+                                        if not bb.is_empty:
+                                            xscale = getattr(entity.dxf, 'xscale', 1.0) or 1.0
+                                            yscale = getattr(entity.dxf, 'yscale', 1.0) or 1.0
+                                            w = abs(bb.size.x * xscale)
+                                            h = abs(bb.size.y * yscale)
+                                            ins = entity.dxf.insert
+                                            block_bounds = BoundsInfo(ins.x, ins.y, ins.x + w, ins.y + h)
+                                except Exception:
+                                    pass
+
+                                all_blocks[block_name] = BlockInfo(
+                                    name=block_name,
+                                    count=1,
+                                    bounds=block_bounds,
+                                    block_type=block_type,
+                                )
+                            else:
+                                all_blocks[block_name].count += 1
+
+                            # If it's a window/door, also add to openings
+                            bi = all_blocks[block_name]
+                            if bi.block_type in ('window', 'door') and bi.bounds:
+                                w = bi.bounds.width
+                                h = bi.bounds.height
+                                if w > 50 and h > 50:  # sanity check
+                                    all_openings.append(OpeningInfo(
+                                        type=bi.block_type,
+                                        width_mm=round(max(w, h), 1),
+                                        height_mm=round(min(w, h), 1),
+                                        area_sqm=round(w * h / 1e6, 4),
+                                        block_name=block_name,
+                                        layer=layer,
+                                    ))
+                        except Exception as e:
+                            logger.debug(f"Error processing INSERT: {e}")
+
+                    # ── HATCH entities → could indicate panel fills ───────
+                    elif dxf_type == 'HATCH':
+                        pass  # Tracked in bounds
+
+                except Exception as e:
+                    # Never crash on a single entity
+                    logger.debug(f"Error processing entity in {layout_name}: {e}")
+                    continue
+
+                entity_idx += 1
+
+            # Build layout info
+            lb = None
+            if not layout_bbox.is_empty:
+                lb = BoundsInfo(
+                    layout_bbox.extmin.x, layout_bbox.extmin.y,
+                    layout_bbox.extmax.x, layout_bbox.extmax.y,
+                )
+
+            layouts_info.append({
+                "name": layout_name,
+                "entity_count": layout_entity_count,
+                "bounds": lb.to_dict() if lb else None,
             })
 
-        layer_polygons = {}
-        for entity in msp.query('LWPOLYLINE HATCH'):
-            layer = entity.dxf.layer
-            if layer not in layer_polygons: layer_polygons[layer] = []
-            if entity.dxftype() == 'LWPOLYLINE':
-                points = [(p[0], p[1]) for p in entity.get_points()]
-                if len(points) >= 3: layer_polygons[layer].append(Polygon(points))
-            elif entity.dxftype() == 'HATCH':
-                for path in entity.paths:
-                    points = [(p[0], p[1]) for p in path.vertices]
-                    if len(points) >= 3: layer_polygons[layer].append(Polygon(points))
+        # ── Spatial clustering to detect overlapping drawings ─────────────────
+        clusters = _cluster_entities(entity_bounds_for_clustering, CLUSTER_DISTANCE_MM)
+        if len(clusters) > 1:
+            warnings.append(
+                f"Detected {len(clusters)} spatially distinct drawing groups "
+                f"(possible overlapping drawings in model space)"
+            )
 
-        for layer, polygons in layer_polygons.items():
-            if layer not in layers_data: layers_data[layer] = {"blocks": [], "areas": []}
-            sorted_polys = sorted(polygons, key=lambda p: p.area, reverse=True)
-            for i, poly in enumerate(sorted_polys):
-                current_poly = poly
-                for j in range(i + 1, len(sorted_polys)):
-                    inner_poly = sorted_polys[j]
-                    if current_poly.contains(inner_poly):
-                        current_poly = current_poly.difference(inner_poly)
-                layers_data[layer]["areas"].append({
-                    "net_area": current_poly.area / 1e6,
-                    "bounds": current_poly.bounds,
-                    "is_complex": isinstance(current_poly, MultiPolygon)
-                })
-        return layers_data
+        # ── Deduplicate panels (merge identical dimensions) ───────────────────
+        panel_counts: dict[tuple[float, float, str], PanelInfo] = {}
+        for p in all_panels:
+            key = (p.width_mm, p.height_mm, p.source)
+            if key in panel_counts:
+                panel_counts[key].count += 1
+            else:
+                panel_counts[key] = PanelInfo(
+                    width_mm=p.width_mm,
+                    height_mm=p.height_mm,
+                    area_sqm=p.area_sqm,
+                    count=1,
+                    source=p.source,
+                    layer=p.layer,
+                )
+        deduped_panels = list(panel_counts.values())
+
+        # ── Deduplicate openings ──────────────────────────────────────────────
+        opening_counts: dict[tuple[str, float, float], OpeningInfo] = {}
+        for o in all_openings:
+            key = (o.block_name or o.type, o.width_mm, o.height_mm)
+            if key in opening_counts:
+                opening_counts[key].count += 1
+            else:
+                opening_counts[key] = OpeningInfo(
+                    type=o.type,
+                    width_mm=o.width_mm,
+                    height_mm=o.height_mm,
+                    area_sqm=o.area_sqm,
+                    block_name=o.block_name,
+                    count=1,
+                    layer=o.layer,
+                )
+        deduped_openings = list(opening_counts.values())
+
+        # ── Compute total facade area ─────────────────────────────────────────
+        total_facade_area = sum(p.area_sqm * p.count for p in deduped_panels)
+
+        # ── Deduplicate text annotations ──────────────────────────────────────
+        unique_texts = list(dict.fromkeys(all_text_annotations))  # preserve order, remove dupes
+
+        # ── Build result ──────────────────────────────────────────────────────
+        return {
+            "layouts": layouts_info,
+            "panels": [
+                {
+                    "width_mm": p.width_mm,
+                    "height_mm": p.height_mm,
+                    "area_sqm": p.area_sqm,
+                    "count": p.count,
+                    "source": p.source,
+                    "layer": p.layer,
+                }
+                for p in deduped_panels
+            ],
+            "openings": [
+                {
+                    "type": o.type,
+                    "width_mm": o.width_mm,
+                    "height_mm": o.height_mm,
+                    "area_sqm": o.area_sqm,
+                    "block_name": o.block_name,
+                    "count": o.count,
+                    "layer": o.layer,
+                }
+                for o in deduped_openings
+            ],
+            "text_annotations": unique_texts[:500],  # Cap at 500 to avoid huge responses
+            "blocks": [
+                {
+                    "name": bi.name,
+                    "count": bi.count,
+                    "bounds": bi.bounds.to_dict() if bi.bounds else None,
+                    "block_type": bi.block_type,
+                }
+                for bi in all_blocks.values()
+            ],
+            "total_facade_area_sqm": round(total_facade_area, 2),
+            "warnings": warnings,
+            "metadata": {
+                "file_size_mb": round(file_size_mb, 2),
+                "total_entities": entity_idx,
+                "total_layouts": len(layouts_info),
+                "spatial_clusters": len(clusters),
+                "unique_blocks": len(all_blocks),
+                "unique_layers": self._count_layers(doc),
+            },
+        }
+
+    def _count_layers(self, doc) -> int:
+        """Count layers in the document."""
+        try:
+            return len(doc.layers)
+        except Exception:
+            return 0
+
+    def _empty_result(self, warnings: list[str] | None = None) -> dict:
+        """Return an empty result dict with optional warnings."""
+        return {
+            "layouts": [],
+            "panels": [],
+            "openings": [],
+            "text_annotations": [],
+            "blocks": [],
+            "total_facade_area_sqm": 0,
+            "warnings": warnings or [],
+            "metadata": {
+                "file_size_mb": 0,
+                "total_entities": 0,
+                "total_layouts": 0,
+                "spatial_clusters": 0,
+                "unique_blocks": 0,
+                "unique_layers": 0,
+            },
+        }

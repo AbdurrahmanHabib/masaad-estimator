@@ -143,6 +143,16 @@ class LLMClient:
     async def complete(self, messages: list, **kwargs) -> str:
         return await complete(messages, **kwargs)
 
+    async def complete_with_vision(
+        self,
+        images_base64: list,
+        prompt: str,
+        temperature: float = 0.1,
+        json_mode: bool = False,
+    ) -> str:
+        """Alias for vision() — used by catalog_pdf_parser."""
+        return await complete_with_vision(images_base64, prompt, temperature=temperature, json_mode=json_mode)
+
 
 def get_system_prompt(role: str) -> str:
     """Standard system prompts for different AI roles."""

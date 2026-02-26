@@ -71,24 +71,21 @@ async def validate_inputs(state: IngestionState) -> IngestionState:
     if dwg_path and dwg_path.endswith((".dwg", ".dxf")):
         try:
             from app.services.dwg_parser import DWGParserService
-            import os
-            oda = os.getenv("ODA_CONVERTER_PATH", "/usr/bin/ODAFileConverter")
-            svc = DWGParserService(oda)
-
-            if dwg_path.endswith(".dwg"):
-                import tempfile
-                tmp_dir = os.path.dirname(dwg_path)
-                dxf_path = svc.convert_dwg_to_dxf(dwg_path, tmp_dir)
-            else:
-                dxf_path = dwg_path
-
-            dwg_extraction = svc.extract_geometry(dxf_path)
-            log.append(f"✅ DWG parsed: {len(dwg_extraction.get('blocks', []))} blocks, "
-                        f"{len(dwg_extraction.get('layers', []))} layers extracted")
+            svc = DWGParserService()
+            dwg_extraction = svc.parse_file(dwg_path)
+            n_blocks = len(dwg_extraction.get("blocks", []))
+            n_panels = len(dwg_extraction.get("panels", []))
+            n_layouts = len(dwg_extraction.get("layouts", []))
+            n_warnings = len(dwg_extraction.get("warnings", []))
+            log.append(
+                f"DWG parsed: {n_layouts} layouts, {n_panels} panels, "
+                f"{n_blocks} blocks extracted"
+                + (f" ({n_warnings} warnings)" if n_warnings else "")
+            )
         except Exception as exc:
-            log.append(f"⚠️ DWG parse warning: {exc} — continuing with empty geometry")
+            log.append(f"DWG parse warning: {exc} -- continuing with empty geometry")
     else:
-        log.append("ℹ️ No DWG provided — scope will be derived from spec text only")
+        log.append("No DWG provided -- scope will be derived from spec text only")
 
     return {**state, "dwg_extraction": dwg_extraction, "reasoning_log": log}
 

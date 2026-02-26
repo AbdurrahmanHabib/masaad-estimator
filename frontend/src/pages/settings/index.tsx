@@ -141,13 +141,13 @@ export default function SettingsDashboard() {
                   </h4>
                   <span className="text-[8px] font-mono text-ms-emerald bg-ms-emerald/5 px-2 py-0.5 rounded border border-ms-emerald/10">Filter: JOB_LOC=='FACTORY'</span>
                 </div>
-                <input type="file" ref={payrollInputRef} className="hidden" accept=".csv" onChange={(e) => handleFileUpload('payroll', e)} />
+                <input type="file" ref={payrollInputRef} className="hidden" accept=".csv,.xlsx,.xls" onChange={(e) => handleFileUpload('payroll', e)} />
                 <div 
                   onClick={() => !isUploading.payroll && payrollInputRef.current?.click()}
                   className="border border-ms-border border-dashed bg-ms-dark/50 p-6 text-center cursor-pointer hover:bg-ms-emerald/[0.02] hover:border-ms-emerald/50 transition-all rounded-sm group/upload"
                 >
                   {isUploading.payroll ? <Loader2 size={20} className="mx-auto text-ms-emerald animate-spin mb-2" /> : <Upload size={20} className="mx-auto text-slate-600 mb-2 group-hover/upload:text-ms-emerald transition-colors" />}
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{isUploading.payroll ? 'Processing...' : 'Upload_Group_Payroll.csv'}</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{isUploading.payroll ? 'Processing...' : 'Upload_Group_Payroll (.xlsx/.csv)'}</p>
                   <p className="text-[7px] text-slate-600 font-mono">ISO_9001 Validation Enabled</p>
                 </div>
               </div>
@@ -160,13 +160,13 @@ export default function SettingsDashboard() {
                   </h4>
                   <span className="text-[8px] font-mono text-ms-amber bg-ms-amber/5 px-2 py-0.5 rounded border border-ms-amber/10">Action: SUM_ALL_COLUMNS</span>
                 </div>
-                <input type="file" ref={expensesInputRef} className="hidden" accept=".csv" onChange={(e) => handleFileUpload('expenses', e)} />
+                <input type="file" ref={expensesInputRef} className="hidden" accept=".csv,.xlsx,.xls" onChange={(e) => handleFileUpload('expenses', e)} />
                 <div 
                   onClick={() => !isUploading.expenses && expensesInputRef.current?.click()}
                   className="border border-ms-border border-dashed bg-ms-dark/50 p-6 text-center cursor-pointer hover:bg-ms-amber/[0.02] hover:border-ms-amber/50 transition-all rounded-sm group/upload"
                 >
                   {isUploading.expenses ? <Loader2 size={20} className="mx-auto text-ms-amber animate-spin mb-2" /> : <Upload size={20} className="mx-auto text-slate-600 mb-2 group-hover/upload:text-ms-amber transition-colors" />}
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{isUploading.expenses ? 'Processing...' : 'Upload_Admin_Expenses.csv'}</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{isUploading.expenses ? 'Processing...' : 'Upload_Admin_Expenses (.xlsx/.csv)'}</p>
                   <p className="text-[7px] text-slate-600 font-mono">Precision: 4 Decimal Places</p>
                 </div>
               </div>

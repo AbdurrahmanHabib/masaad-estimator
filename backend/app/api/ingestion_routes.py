@@ -42,6 +42,13 @@ async def new_project(
     project_country: str = Form("UAE"),
     complexity_multiplier: float = Form(1.0),
     scope_boundary: str = Form("Panels + Substructure"),
+    contract_type: str = Form("Supply + Fabricate + Install"),
+    site_conditions: str = Form(""),
+    specification_notes: str = Form(""),
+    known_exclusions: str = Form(""),
+    estimator_notes: str = Form(""),
+    budget_cap_aed: Optional[float] = Form(None),
+    delivery_weeks: Optional[int] = Form(None),
     dwg_file: Optional[UploadFile] = File(None),
     spec_file: Optional[UploadFile] = File(None),
     extra_file: Optional[UploadFile] = File(None),
@@ -95,6 +102,7 @@ async def new_project(
         location_zone=project_location,
         project_country=project_country,
         is_international=(project_country.upper() != "UAE"),
+        contract_type=contract_type,
         scope_boundary=scope_boundary,
         complexity_multiplier=complexity_multiplier,
         created_by=current_user.id,
@@ -121,6 +129,13 @@ async def new_project(
             "project_country": project_country,
             "complexity_multiplier": complexity_multiplier,
             "scope_boundary": scope_boundary,
+            "contract_type": contract_type,
+            "site_conditions": site_conditions,
+            "specification_notes": specification_notes,
+            "known_exclusions": known_exclusions,
+            "estimator_notes": estimator_notes,
+            "budget_cap_aed": budget_cap_aed,
+            "delivery_weeks": delivery_weeks,
         },
     )
     db.add(estimate)
@@ -276,7 +291,10 @@ async def _run_pipeline_inline(estimate_id: str, user_id: str):
                 estimate.status = final_state.get("status", "REVIEW_REQUIRED")
                 estimate.progress_pct = final_state.get("progress_pct", 100)
                 estimate.current_step = final_state.get("current_node", "Complete")
-                estimate.bom_output_json = {"items": final_state.get("bom_items", [])}
+                estimate.bom_output_json = {
+                    "items": final_state.get("bom_items", []),
+                    "summary": final_state.get("bom_summary", {}),
+                }
                 estimate.project_scope_json = final_state.get("project_scope") if isinstance(final_state.get("project_scope"), dict) else {}
                 estimate.opening_schedule_json = {"openings": final_state.get("extracted_openings", [])}
                 estimate.cutting_list_json = {"items": final_state.get("cutting_list", [])}
@@ -362,16 +380,9 @@ async def upload_drawings(
 
     try:
         from app.services.dwg_parser import DWGParserService
-        oda_path = os.getenv("ODA_CONVERTER_PATH", "/usr/bin/ODAFileConverter")
-        svc = DWGParserService(oda_path)
-
-        if dwg_path.endswith(".dwg"):
-            dxf_path = svc.convert_dwg_to_dxf(dwg_path, temp_dir)
-        else:
-            dxf_path = dwg_path
-
-        geometry = svc.extract_geometry(dxf_path)
-        return {"status": "success", "file_id": temp_id, "extraction": geometry}
+        svc = DWGParserService()
+        result = svc.parse_file(dwg_path)
+        return {"status": "success", "file_id": temp_id, "extraction": result}
     except Exception as exc:
         logger.error(f"DWG parse error: {exc}")
         raise HTTPException(500, f"DWG parsing failed: {exc}")
@@ -502,6 +513,38 @@ async def recent_estimates(
         }
         for e, p in rows
     ]
+
+
+@router.post("/approve/{estimate_id}")
+async def approve_estimate_ingestion(
+    estimate_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Approval endpoint on the ingestion router.
+    Transitions estimate from REVIEW_REQUIRED to APPROVED.
+    """
+    from datetime import datetime, timezone
+
+    result = await db.execute(select(Estimate).where(Estimate.id == estimate_id))
+    estimate = result.scalar_one_or_none()
+    if not estimate:
+        raise HTTPException(404, "Estimate not found")
+    if estimate.status not in ("REVIEW_REQUIRED", "Processing"):
+        raise HTTPException(
+            400,
+            f"Estimate status is '{estimate.status}' -- can only approve REVIEW_REQUIRED estimates"
+        )
+    estimate.status = "APPROVED"
+    if hasattr(estimate, 'approved_at'):
+        estimate.approved_at = datetime.now(timezone.utc)
+    snap = dict(estimate.state_snapshot or {})
+    snap["approved_by"] = str(current_user.id)
+    snap["approved_at"] = datetime.now(timezone.utc).isoformat()
+    estimate.state_snapshot = snap
+    await db.commit()
+    return {"estimate_id": estimate_id, "status": "APPROVED", "approved_by": str(current_user.id)}
 
 
 @router.get("/estimate/{estimate_id}")
