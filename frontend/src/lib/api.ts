@@ -8,9 +8,11 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
  */
 export async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
   const authHeaders = getAuthHeaders();
+  const isFormData = options.body instanceof FormData;
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    // Don't set Content-Type for FormData — browser sets it with boundary
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...authHeaders,
     ...(options.headers as Record<string, string> | undefined),
   };

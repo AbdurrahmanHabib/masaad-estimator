@@ -194,7 +194,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        # No CSP on API responses — frontend is on a different origin (Railway subdomain)
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         return response
 
@@ -213,11 +213,24 @@ _railway_static = os.getenv("RAILWAY_STATIC_URL", "")
 if _railway_static:
     cors_origins.append(_railway_static.rstrip("/"))
 
+# Explicitly add FRONTEND_URL if set (primary way to whitelist frontend origin)
+_frontend_url = os.getenv("FRONTEND_URL", "")
+if _frontend_url:
+    cors_origins.append(_frontend_url.rstrip("/"))
+
 # On Railway, allow all *.up.railway.app origins (frontend + backend may have different subdomains)
 _allow_origin_regex = None
 if os.getenv("RAILWAY_ENVIRONMENT_NAME") or _railway_domain:
     _allow_origin_regex = r"https://.*\.up\.railway\.app"
 
+logger.info("CORS origins: %s | regex: %s", cors_origins, _allow_origin_regex)
+
+# Middleware order: last-added = outermost (first to process incoming requests).
+# CORSMiddleware MUST be outermost so preflight OPTIONS gets CORS headers
+# before any other middleware can reject the request.
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -226,10 +239,18 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
 )
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RateLimitMiddleware)
-# Request timing + X-Request-ID must be outermost so it wraps all other middleware
-app.add_middleware(RequestTimingMiddleware)
+
+# ---------------------------------------------------------------------------
+# Global exception handler — ensures CORS headers appear even on 500 errors.
+# Without this, unhandled exceptions bypass CORSMiddleware response processing.
+# ---------------------------------------------------------------------------
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled exception on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 # Routers
 from app.api.settings_routes import router as settings_router
@@ -392,9 +413,70 @@ async def estimate_status(estimate_id: str):
 
 
 @app.get("/api/v1/estimates/recent")
-async def recent_estimates_v1_shortcut(request: Request):
-    """Shortcut route — must be registered BEFORE the {estimate_id} param route."""
-    return await recent_estimates_v1(request)
+async def recent_estimates_v1(request: Request):
+    """
+    Return the last 10 estimates with joined project info for the dashboard.
+    Accepts a Bearer token in the Authorization header; 401 if missing or invalid.
+    """
+    from app.db import AsyncSessionLocal
+    from app.models.orm_models import Estimate, Project, User
+    from sqlalchemy import select, desc
+    from jose import jwt as _jwt, JWTError as _JWTError
+    import os as _os
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = auth_header.split(" ", 1)[1]
+    _SECRET = _os.getenv("JWT_SECRET_KEY", "changethis_use_a_real_secret_in_production_64chars")
+    _ALGO = _os.getenv("JWT_ALGORITHM", "HS256")
+    try:
+        token_payload = _jwt.decode(token, _SECRET, algorithms=[_ALGO])
+        user_id = token_payload.get("sub")
+        if not user_id:
+            raise ValueError("No sub claim")
+    except (_JWTError, ValueError) as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    async with AsyncSessionLocal() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        current_user = user_result.scalar_one_or_none()
+        if not current_user:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail="User not found")
+
+        tenant_id = current_user.tenant_id
+        if not tenant_id:
+            return []
+
+        query = (
+            select(Estimate, Project)
+            .outerjoin(Project, Estimate.project_id == Project.id)
+            .where(Estimate.tenant_id == tenant_id)
+            .order_by(desc(Estimate.created_at))
+            .limit(10)
+        )
+        result = await session.execute(query)
+        rows = result.all()
+
+    return [
+        {
+            "estimate_id": str(e.id),
+            "project_id": str(e.project_id),
+            "project_name": (p.name if p else "") or "",
+            "client_name": (p.client_name if p else "") or "",
+            "location": (p.location_zone if p else "") or "",
+            "status": e.status,
+            "progress_pct": e.progress_pct,
+            "current_step": e.current_step,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+            "bom_summary": (e.bom_output_json or {}).get("summary", {}),
+        }
+        for e, p in rows
+    ]
 
 
 @app.get("/api/v1/estimates/{estimate_id}")
@@ -646,69 +728,6 @@ async def seed_al_kabir_endpoint():
     """
     from app.db.seed_al_kabir import seed_al_kabir
     return await seed_al_kabir()
-
-
-@app.get("/api/v1/estimates/recent")
-async def recent_estimates_v1(request: Request):
-    """
-    Return the last 10 estimates with joined project info for the dashboard.
-    Accepts a Bearer token in the Authorization header; 401 if missing or invalid.
-    """
-    from app.db import AsyncSessionLocal
-    from app.models.orm_models import Estimate, Project, User
-    from sqlalchemy import select, desc
-    from jose import jwt as _jwt, JWTError as _JWTError
-    import os as _os
-
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    token = auth_header.split(" ", 1)[1]
-    _SECRET = _os.getenv("JWT_SECRET_KEY", "changethis_use_a_real_secret_in_production_64chars")
-    _ALGO = _os.getenv("JWT_ALGORITHM", "HS256")
-    try:
-        token_payload = _jwt.decode(token, _SECRET, algorithms=[_ALGO])
-        user_id = token_payload.get("sub")
-        if not user_id:
-            raise ValueError("No sub claim")
-    except (_JWTError, ValueError) as exc:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    async with AsyncSessionLocal() as session:
-        user_result = await session.execute(select(User).where(User.id == user_id))
-        current_user = user_result.scalar_one_or_none()
-        if not current_user:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=401, detail="User not found")
-
-        query = (
-            select(Estimate, Project)
-            .join(Project, Estimate.project_id == Project.id)
-            .where(Estimate.tenant_id == current_user.tenant_id)
-            .order_by(desc(Estimate.created_at))
-            .limit(10)
-        )
-        result = await session.execute(query)
-        rows = result.all()
-
-    return [
-        {
-            "estimate_id": str(e.id),
-            "project_id": str(e.project_id),
-            "project_name": p.name or "",
-            "client_name": p.client_name or "",
-            "location": p.location_zone or "",
-            "status": e.status,
-            "progress_pct": e.progress_pct,
-            "current_step": e.current_step,
-            "created_at": e.created_at.isoformat() if e.created_at else None,
-            "updated_at": e.updated_at.isoformat() if e.updated_at else None,
-            "bom_summary": (e.bom_output_json or {}).get("summary", {}),
-        }
-        for e, p in rows
-    ]
 
 
 @app.get("/api/dashboard/summary")

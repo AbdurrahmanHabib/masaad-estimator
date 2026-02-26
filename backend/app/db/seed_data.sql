@@ -36,10 +36,10 @@ INSERT INTO material_rates (tenant_id)
 SELECT id FROM tenants WHERE slug = 'masaad'
 ON CONFLICT (tenant_id) DO NOTHING;
 
--- 5. Default admin user (admin@masaad.ae / admin1234)
+-- 5. Default admin user (admin@madinatalsaada.ae / admin1234)
 INSERT INTO users (email, hashed_password, full_name, is_active, tenant_id, role_id)
 SELECT
-    'admin@masaad.ae',
+    'admin@madinatalsaada.ae',
     '$2b$12$mJcF8vQBFaFZdmwwRUE/D.PXKYyoUMcz7ZAhYVJ4VRY3nqSwfoKDy',
     'Admin',
     TRUE,
@@ -47,7 +47,14 @@ SELECT
     r.id
 FROM tenants t, roles r
 WHERE t.slug = 'masaad' AND r.name = 'Admin'
-ON CONFLICT (email) DO NOTHING;
+ON CONFLICT (email) DO UPDATE SET
+    role_id = EXCLUDED.role_id,
+    hashed_password = EXCLUDED.hashed_password,
+    is_active = TRUE;
+
+-- 5b. Fix any existing admin@masaad.ae users to have Admin role
+UPDATE users SET role_id = (SELECT id FROM roles WHERE name = 'Admin' LIMIT 1)
+WHERE email IN ('admin@masaad.ae', 'admin@madinatalsaada.ae') AND role_id IS NULL;
 
 -- 6. Default consultant dictionary entries (common UAE layer naming conventions)
 INSERT INTO consultant_dictionary (tenant_id, consultant_name, raw_layer_name, mapped_internal_type)

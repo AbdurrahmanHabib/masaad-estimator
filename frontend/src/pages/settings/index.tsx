@@ -11,7 +11,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import CatalogUploader from '../../components/Settings/CatalogUploader';
-import { apiGet, apiPut } from '../../lib/api';
+import { apiGet, apiPut, apiPost, apiFetch } from '../../lib/api';
 
 export default function SettingsDashboard() {
   const [marketVars, setMarketVars] = useState({ lmeRate: 2450.00, billetPremium: 450.00 });
@@ -78,8 +78,7 @@ export default function SettingsDashboard() {
   };
 
   useEffect(() => {
-    fetch(`${API_URL}/api/settings/current-rates`)
-      .then((r) => r.ok ? r.json() : null)
+    apiGet<Record<string, any>>('/api/settings/current-rates')
       .then((data) => {
         if (!data) return;
         if (data.lme_aluminum_usd_mt) setMarketVars(prev => ({ ...prev, lmeRate: data.lme_aluminum_usd_mt }));
@@ -100,9 +99,9 @@ export default function SettingsDashboard() {
 
     try {
       const endpoint = type === 'payroll' ? '/api/settings/upload-payroll' : '/api/settings/upload-expenses';
-      const res = await fetch(`${API_URL}${endpoint}`, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
-        body: formData
+        body: formData,
       });
 
       if (!res.ok) throw new Error(`${type} upload failed`);
@@ -131,16 +130,12 @@ export default function SettingsDashboard() {
 
   const commitMarketVars = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/settings/update-market`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lme_rate: marketVars.lmeRate,
-          billet_premium: marketVars.billetPremium,
-          stock_length: 6.0
-        })
+      await apiPost('/api/settings/update-market', {
+        lme_rate: marketVars.lmeRate,
+        billet_premium: marketVars.billetPremium,
+        stock_length: 6.0,
       });
-      if (res.ok) alert("Market Variables Committed");
+      alert("Market Variables Committed");
     } catch (err) {
       console.error(err);
     }

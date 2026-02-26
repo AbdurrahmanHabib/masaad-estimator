@@ -227,7 +227,7 @@ export default function LoginPage() {
                   type="button"
                   disabled={loading}
                   onClick={async () => {
-                    setEmail('admin@masaad.ae');
+                    setEmail('admin@madinatalsaada.ae');
                     setPassword('admin1234');
                     setError(null);
                     setLoading(true);
@@ -235,7 +235,7 @@ export default function LoginPage() {
                       const res = await fetch(`${BASE_URL}/api/auth/login`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: 'admin@masaad.ae', password: 'admin1234' }),
+                        body: JSON.stringify({ email: 'admin@madinatalsaada.ae', password: 'admin1234' }),
                       });
                       if (!res.ok) {
                         const data = await res.json().catch(() => ({}));
