@@ -36,6 +36,7 @@ class GraphState(TypedDict):
     extracted_openings: List[dict]         # From IngestionNode
     catalog_matches: List[dict]            # From ScopeIdentificationNode
     bom_items: List[dict]                  # From BOMNode
+    bom_summary: Optional[dict]            # Financial summary from BOMEngine.generate_summary()
     cutting_list: List[dict]               # From CuttingListNode
     pricing_data: dict                     # From PricingNode
     ve_suggestions: List[dict]             # From CommercialNode

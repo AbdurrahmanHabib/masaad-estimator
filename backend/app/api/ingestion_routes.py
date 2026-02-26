@@ -256,6 +256,7 @@ async def _run_pipeline_inline(estimate_id: str, user_id: str):
                 "extracted_openings": [],
                 "catalog_matches": [],
                 "bom_items": [],
+                "bom_summary": None,
                 "cutting_list": [],
                 "pricing_data": {},
                 "ve_suggestions": [],
