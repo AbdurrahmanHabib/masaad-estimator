@@ -59,6 +59,18 @@ async def init_db():
                 logger.warning("DB_RESET_ON_STARTUP=true — dropping all tables")
                 await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
+
+            # Add any missing columns (safe ALTER TABLE IF NOT EXISTS pattern)
+            _migrations = [
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS client_name VARCHAR(255)",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Active'",
+            ]
+            for sql in _migrations:
+                try:
+                    await conn.execute(__import__('sqlalchemy').text(sql))
+                except Exception:
+                    pass  # Column already exists or table not yet created
+
         logger.info("Database tables initialized.")
     except Exception as e:
         logger.warning(f"init_db skipped (DB not available): {e}")
