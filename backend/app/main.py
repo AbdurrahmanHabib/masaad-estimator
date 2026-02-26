@@ -213,9 +213,15 @@ _railway_static = os.getenv("RAILWAY_STATIC_URL", "")
 if _railway_static:
     cors_origins.append(_railway_static.rstrip("/"))
 
+# On Railway, allow all *.up.railway.app origins (frontend + backend may have different subdomains)
+_allow_origin_regex = None
+if os.getenv("RAILWAY_ENVIRONMENT_NAME") or _railway_domain:
+    _allow_origin_regex = r"https://.*\.up\.railway\.app"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=_allow_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],

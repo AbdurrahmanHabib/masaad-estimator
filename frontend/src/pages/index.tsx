@@ -35,23 +35,17 @@ interface DashboardSummary {
 
 interface RecentEstimate {
   estimate_id: string;
+  project_id?: string;
   project_name?: string;
   client_name?: string;
+  location?: string;
   status: string;
+  progress_pct?: number;
+  current_step?: string;
   total_sell_price_aed?: number;
   created_at?: string;
+  bom_summary?: Record<string, unknown>;
 }
-
-// ─── Al Kabir Tower — authoritative showcase project ─────────────────────────
-
-const AL_KABIR: RecentEstimate = {
-  estimate_id: 'PRJ-KAB-001',
-  project_name: 'Al Kabir Tower',
-  client_name: 'BIR Mimarlik',
-  status: 'REVIEW_REQUIRED',
-  total_sell_price_aed: 8_300_000,
-  created_at: new Date().toISOString(),
-};
 
 const STATUS_COLORS: Record<string, string> = {
   ESTIMATING: 'bg-blue-100 text-blue-700 border-blue-200',
@@ -59,6 +53,8 @@ const STATUS_COLORS: Record<string, string> = {
   APPROVED: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   DISPATCHED: 'bg-purple-100 text-purple-700 border-purple-200',
   Completed: 'bg-slate-100 text-slate-500 border-slate-200',
+  Queued: 'bg-blue-100 text-blue-600 border-blue-200',
+  Failed: 'bg-red-100 text-red-600 border-red-200',
 };
 
 // ─── Skeleton component ───────────────────────────────────────────────────────
@@ -74,7 +70,7 @@ function Skeleton({ className = '' }: { className?: string }) {
 export default function Dashboard() {
   const { user } = useAuthStore();
   const [summary, setSummary] = React.useState<DashboardSummary | null>(null);
-  const [recentEstimates, setRecentEstimates] = React.useState<RecentEstimate[]>([AL_KABIR]);
+  const [recentEstimates, setRecentEstimates] = React.useState<RecentEstimate[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [lastSyncTime, setLastSyncTime] = React.useState<string | null>(null);
 
@@ -100,12 +96,10 @@ export default function Dashboard() {
       try {
         const data = await apiGet<RecentEstimate[]>('/api/v1/estimates/recent');
         if (Array.isArray(data) && data.length > 0) {
-          // Ensure Al Kabir always appears first as the primary showcase project
-          const withoutKabir = data.filter(e => e.estimate_id !== 'PRJ-KAB-001');
-          setRecentEstimates([AL_KABIR, ...withoutKabir]);
+          setRecentEstimates(data);
         }
       } catch {
-        // Non-fatal — keep static Al Kabir entry
+        // Non-fatal — show empty state
       }
     };
 
@@ -116,10 +110,14 @@ export default function Dashboard() {
   const firstName = user?.full_name?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'Admin';
 
   const activeProjects = summary?.total_projects ?? summary?.active_processing;
-  const totalEstimates = summary?.total_estimates;
+  const totalEstimates = summary?.total_estimates ?? recentEstimates.length;
   const marginPct = summary?.factory_margin_pct;
   const rfis = summary?.technical_rfis;
   const gaps = summary?.optimization_gaps;
+
+  // Featured project: first estimate with REVIEW_REQUIRED status, or the first estimate
+  const featuredEstimate = recentEstimates.find(e => e.status === 'REVIEW_REQUIRED') ?? recentEstimates[0];
+  const isInternational = featuredEstimate?.location && !featuredEstimate.location.toLowerCase().includes('uae');
 
   return (
     <div className="space-y-10">
@@ -158,7 +156,7 @@ export default function Dashboard() {
             : <p className="text-xs text-slate-500 mt-1">
                 {activeProjects !== undefined
                   ? `${String(activeProjects).padStart(2, '0')} Live Estimations`
-                  : '04 Live Estimations'}
+                  : `${String(recentEstimates.length).padStart(2, '0')} Live Estimations`}
               </p>
           }
         </div>
@@ -187,7 +185,7 @@ export default function Dashboard() {
           {loading
             ? <Skeleton className="w-36 h-4 mt-1" />
             : <p className="text-xs text-slate-500 mt-1">
-                {rfis !== undefined ? `${String(rfis).padStart(2, '0')} Requires Review` : '02 Requires Review'}
+                {rfis !== undefined ? `${String(rfis).padStart(2, '0')} Requires Review` : `${String(recentEstimates.filter(e => e.status === 'REVIEW_REQUIRED').length).padStart(2, '0')} Requires Review`}
               </p>
           }
         </div>
@@ -202,7 +200,7 @@ export default function Dashboard() {
             {loading
               ? <Skeleton className="w-20 h-12 bg-white/20" />
               : <p className="text-5xl font-mono font-black tracking-tighter">
-                  {totalEstimates !== undefined ? String(totalEstimates).padStart(2, '0') : '90'}
+                  {String(totalEstimates).padStart(2, '0')}
                 </p>
             }
             <div className="mt-8 flex items-center gap-2 text-[10px] font-bold bg-white/10 w-fit px-3 py-1 rounded-full">
@@ -219,7 +217,7 @@ export default function Dashboard() {
             {loading
               ? <Skeleton className="w-20 h-12 bg-white/20" />
               : <p className="text-5xl font-mono font-black tracking-tighter">
-                  {marginPct !== undefined ? `${marginPct}%` : '24%'}
+                  {marginPct !== undefined ? `${marginPct}%` : '18%'}
                 </p>
             }
             <div className="mt-8 flex items-center gap-2 text-[10px] font-bold bg-white/10 w-fit px-3 py-1 rounded-full">
@@ -236,7 +234,7 @@ export default function Dashboard() {
             {loading
               ? <Skeleton className="w-20 h-12 bg-white/20" />
               : <p className="text-5xl font-mono font-black tracking-tighter">
-                  {rfis !== undefined ? String(rfis).padStart(2, '0') : '02'}
+                  {rfis !== undefined ? String(rfis).padStart(2, '0') : '00'}
                 </p>
             }
             <div className="mt-8 flex items-center gap-2 text-[10px] font-bold bg-white/10 w-fit px-3 py-1 rounded-full">
@@ -253,7 +251,7 @@ export default function Dashboard() {
             {loading
               ? <Skeleton className="w-20 h-12 bg-white/20" />
               : <p className="text-5xl font-mono font-black tracking-tighter">
-                  {gaps !== undefined ? String(gaps).padStart(2, '0') : '05'}
+                  {gaps !== undefined ? String(gaps).padStart(2, '0') : '00'}
                 </p>
             }
             <div className="mt-8 flex items-center gap-2 text-[10px] font-bold bg-white/10 w-fit px-3 py-1 rounded-full">
@@ -264,67 +262,82 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* AL KABIR TOWER — PRIMARY SHOWCASE PROJECT */}
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl shadow-xl p-8 relative overflow-hidden">
-        {/* Background decoration */}
-        <div className="absolute inset-0 opacity-5"
-          style={{
-            backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)',
-            backgroundSize: '32px 32px',
-          }}
-        />
-        <Building2 size={200} className="absolute -bottom-8 -right-8 opacity-5 rotate-6" />
+      {/* FEATURED PROJECT — dynamic from API */}
+      {featuredEstimate && (
+        <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl shadow-xl p-8 relative overflow-hidden">
+          <div className="absolute inset-0 opacity-5"
+            style={{
+              backgroundImage: 'linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)',
+              backgroundSize: '32px 32px',
+            }}
+          />
+          <Building2 size={200} className="absolute -bottom-8 -right-8 opacity-5 rotate-6" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="flex items-start gap-5">
-            <div className="w-14 h-14 bg-blue-600/20 border border-blue-500/30 rounded-2xl flex items-center justify-center shrink-0">
-              <Building2 size={28} className="text-blue-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <span className="text-[9px] font-black uppercase tracking-[0.25em] text-blue-400">Featured_Project</span>
-                <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded border bg-amber-500/20 text-amber-400 border-amber-500/30">
-                  Review Required
-                </span>
-                <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded border bg-purple-500/20 text-purple-400 border-purple-500/30 flex items-center gap-1">
-                  <Globe size={10} /> International
-                </span>
+          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div className="flex items-start gap-5">
+              <div className="w-14 h-14 bg-blue-600/20 border border-blue-500/30 rounded-2xl flex items-center justify-center shrink-0">
+                <Building2 size={28} className="text-blue-400" />
               </div>
-              <h2 className="text-2xl font-black text-white uppercase tracking-tighter">Al Kabir Tower</h2>
-              <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-400">
-                <span className="flex items-center gap-1.5"><Briefcase size={12} /> BIR Mimarlik</span>
-                <span className="w-1 h-1 bg-slate-600 rounded-full" />
-                <span className="flex items-center gap-1.5"><MapPin size={12} /> Turkey (International)</span>
-                <span className="w-1 h-1 bg-slate-600 rounded-full" />
-                <span>15-Story Mixed-Use Tower</span>
-                <span className="w-1 h-1 bg-slate-600 rounded-full" />
-                <span>Curtain Wall · ACP · Balustrades · Spider Glazing</span>
+              <div>
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="text-[9px] font-black uppercase tracking-[0.25em] text-blue-400">Featured_Project</span>
+                  <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded border ${
+                    featuredEstimate.status === 'REVIEW_REQUIRED'
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                      : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                  }`}>
+                    {featuredEstimate.status.replace(/_/g, ' ')}
+                  </span>
+                  {isInternational && (
+                    <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded border bg-purple-500/20 text-purple-400 border-purple-500/30 flex items-center gap-1">
+                      <Globe size={10} /> International
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-2xl font-black text-white uppercase tracking-tighter">
+                  {featuredEstimate.project_name || 'Unnamed Project'}
+                </h2>
+                <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-400">
+                  {featuredEstimate.client_name && (
+                    <>
+                      <span className="flex items-center gap-1.5"><Briefcase size={12} /> {featuredEstimate.client_name}</span>
+                      <span className="w-1 h-1 bg-slate-600 rounded-full" />
+                    </>
+                  )}
+                  {featuredEstimate.location && (
+                    <>
+                      <span className="flex items-center gap-1.5"><MapPin size={12} /> {featuredEstimate.location}{isInternational ? ' (International)' : ''}</span>
+                      <span className="w-1 h-1 bg-slate-600 rounded-full" />
+                    </>
+                  )}
+                  {featuredEstimate.progress_pct !== undefined && (
+                    <span>Progress: {featuredEstimate.progress_pct}%</span>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex flex-col lg:items-end gap-3 shrink-0">
-            <div className="flex items-baseline gap-2">
-              <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Contract Value</span>
-              <span className="text-3xl font-mono font-black text-white">AED 8.3M</span>
-            </div>
-            <div className="flex gap-2">
-              <Link
-                href="/estimate/PRJ-KAB-001"
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/30 flex items-center gap-2"
-              >
-                Open Estimate <ChevronRight size={14} />
-              </Link>
-              <Link
-                href="/estimate/PRJ-KAB-001/approve"
-                className="px-5 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2"
-              >
-                <ShieldCheck size={14} /> Approve
-              </Link>
+            <div className="flex flex-col lg:items-end gap-3 shrink-0">
+              <div className="flex gap-2">
+                <Link
+                  href={`/estimate/${featuredEstimate.estimate_id}`}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/30 flex items-center gap-2"
+                >
+                  Open Estimate <ChevronRight size={14} />
+                </Link>
+                {featuredEstimate.status === 'REVIEW_REQUIRED' && (
+                  <Link
+                    href={`/estimate/${featuredEstimate.estimate_id}/approve`}
+                    className="px-5 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/30 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2"
+                  >
+                    <ShieldCheck size={14} /> Approve
+                  </Link>
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* RECENT ESTIMATES */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -344,33 +357,41 @@ export default function Dashboard() {
         </div>
 
         <div className="divide-y divide-slate-100">
+          {recentEstimates.length === 0 && !loading && (
+            <div className="px-8 py-12 text-center text-slate-400">
+              <Building2 size={48} className="mx-auto mb-4 opacity-30" />
+              <p className="text-sm font-bold">No estimates yet</p>
+              <p className="text-xs mt-1">Create your first estimation to get started.</p>
+            </div>
+          )}
+          {loading && recentEstimates.length === 0 && (
+            <div className="px-8 py-5">
+              <Skeleton className="w-full h-12" />
+            </div>
+          )}
           {recentEstimates.map((est, idx) => {
-            const isKabir = est.estimate_id === 'PRJ-KAB-001';
             const statusClass = STATUS_COLORS[est.status] ?? 'bg-slate-100 text-slate-500 border-slate-200';
+            const estLocation = est.location || '';
+            const estIsIntl = estLocation && !estLocation.toLowerCase().includes('uae');
             return (
               <div
                 key={est.estimate_id}
                 className={`flex items-center justify-between px-8 py-5 hover:bg-blue-50/30 transition-colors ${idx > 0 ? 'opacity-70' : ''}`}
               >
                 <div className="flex items-center gap-4">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${isKabir ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${idx === 0 ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
                     <Building2 size={18} />
                   </div>
                   <div>
-                    <p className={`text-sm font-black uppercase tracking-tight ${isKabir ? 'text-blue-600' : 'text-slate-700'}`}>
-                      {est.project_name || est.estimate_id}
+                    <p className={`text-sm font-black uppercase tracking-tight ${idx === 0 ? 'text-blue-600' : 'text-slate-700'}`}>
+                      {est.project_name || est.estimate_id.slice(0, 12)}
                     </p>
                     <p className="text-[10px] text-slate-400 mt-0.5 uppercase font-medium tracking-tight">
-                      {est.client_name || 'Unknown Client'} {isKabir ? '· Turkey (International)' : ''}
+                      {est.client_name || 'Unknown Client'}{estIsIntl ? ` · ${estLocation} (International)` : estLocation ? ` · ${estLocation}` : ''}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-6">
-                  {est.total_sell_price_aed && (
-                    <span className="text-sm font-mono font-black text-slate-800">
-                      AED {(est.total_sell_price_aed / 1_000_000).toFixed(1)}M
-                    </span>
-                  )}
                   <span className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-full border ${statusClass}`}>
                     {est.status.replace(/_/g, ' ')}
                   </span>
@@ -387,116 +408,11 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* PROJECT DEPLOYMENT QUEUE */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-6 bg-blue-600 rounded-full"></div>
-            <h3 className="text-sm font-black uppercase tracking-widest text-slate-800 italic">
-              Project_Deployment_Queue
-            </h3>
-          </div>
-          <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            <Clock size={14} /> Last Sync: {lastSyncTime || '...'}
-          </div>
+      {/* LIVE SYNC FOOTER */}
+      <div className="flex justify-center">
+        <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+          <Clock size={14} /> Last Sync: {lastSyncTime || '...'}
         </div>
-
-        <table className="w-full text-left">
-          <thead className="bg-slate-50 text-slate-400 uppercase text-[9px] font-black tracking-widest border-b border-slate-200">
-            <tr>
-              <th className="px-8 py-4">Project_Ref</th>
-              <th className="px-8 py-4">Primary_Client</th>
-              <th className="px-8 py-4">Region</th>
-              <th className="px-8 py-4">Status</th>
-              <th className="px-8 py-4 text-right">Verification</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 font-sans text-xs">
-            {loading ? (
-              // Skeleton rows while loading
-              [1, 2].map((i) => (
-                <tr key={i}>
-                  <td className="px-8 py-5"><Skeleton className="w-28 h-4" /></td>
-                  <td className="px-8 py-5"><Skeleton className="w-36 h-4" /></td>
-                  <td className="px-8 py-5"><Skeleton className="w-28 h-4" /></td>
-                  <td className="px-8 py-5"><Skeleton className="w-24 h-6 rounded-full" /></td>
-                  <td className="px-8 py-5 text-right"><Skeleton className="w-24 h-8 ml-auto rounded-xl" /></td>
-                </tr>
-              ))
-            ) : summary?.projects && summary.projects.length > 0 ? (
-              summary.projects.map((project, idx) => (
-                <tr
-                  key={project.project_ref}
-                  className={`hover:bg-blue-50/30 transition-colors group ${idx > 0 ? 'opacity-60' : ''}`}
-                >
-                  <td className="px-8 py-5 font-black text-blue-600">{project.project_ref}</td>
-                  <td className="px-8 py-5 text-slate-700 font-bold uppercase tracking-tight italic">{project.client_name}</td>
-                  <td className="px-8 py-5 text-slate-500 uppercase text-[10px] font-medium tracking-tighter">{project.region}</td>
-                  <td className="px-8 py-5">
-                    <span className={`px-3 py-1 text-[9px] font-black uppercase tracking-widest rounded-full shadow-sm border ${
-                      project.status.toLowerCase().includes('complet')
-                        ? 'bg-slate-100 text-slate-400 border-slate-200'
-                        : 'bg-emerald-100 text-emerald-600 border-emerald-200'
-                    }`}>
-                      {project.status.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td className="px-8 py-5 text-right">
-                    {project.status.toLowerCase().includes('complet') ? (
-                      <button className="text-[10px] text-slate-400 font-black uppercase tracking-widest cursor-not-allowed">
-                        Archive_Only
-                      </button>
-                    ) : (
-                      <Link
-                        href={`/estimate/${project.project_ref}`}
-                        className="text-[10px] bg-slate-800 hover:bg-blue-600 text-white px-5 py-2 rounded-xl transition-all uppercase font-black tracking-widest shadow-lg shadow-blue-600/10"
-                      >
-                        Launch_Audit
-                      </Link>
-                    )}
-                  </td>
-                </tr>
-              ))
-            ) : (
-              // Static fallback rows when API returns no projects
-              <>
-                <tr className="hover:bg-blue-50/30 transition-colors group">
-                  <td className="px-8 py-5 font-black text-blue-600">PRJ-KAB-001</td>
-                  <td className="px-8 py-5 text-slate-700 font-bold uppercase tracking-tight italic">Al Kabir Tower</td>
-                  <td className="px-8 py-5 text-slate-500 uppercase text-[10px] font-medium tracking-tighter">Turkey_(International)</td>
-                  <td className="px-8 py-5">
-                    <span className="px-3 py-1 bg-amber-100 text-amber-700 border border-amber-200 text-[9px] font-black uppercase tracking-widest rounded-full shadow-sm">
-                      Review_Required
-                    </span>
-                  </td>
-                  <td className="px-8 py-5 text-right">
-                    <Link
-                      href="/estimate/PRJ-KAB-001"
-                      className="text-[10px] bg-slate-800 hover:bg-blue-600 text-white px-5 py-2 rounded-xl transition-all uppercase font-black tracking-widest shadow-lg shadow-blue-600/10"
-                    >
-                      Launch_Audit
-                    </Link>
-                  </td>
-                </tr>
-                <tr className="hover:bg-blue-50/30 transition-colors opacity-60">
-                  <td className="px-8 py-5 text-slate-400">PRJ-DXB-042</td>
-                  <td className="px-8 py-5 text-slate-400 font-bold uppercase tracking-tight italic">Dubai Hills Villa</td>
-                  <td className="px-8 py-5 text-slate-400 uppercase text-[10px] font-medium">Dubai_UAE</td>
-                  <td className="px-8 py-5">
-                    <span className="px-3 py-1 bg-slate-100 text-slate-400 text-[9px] font-bold uppercase tracking-widest rounded-full">
-                      Completed
-                    </span>
-                  </td>
-                  <td className="px-8 py-5 text-right">
-                    <button className="text-[10px] text-slate-400 font-black uppercase tracking-widest cursor-not-allowed">
-                      Archive_Only
-                    </button>
-                  </td>
-                </tr>
-              </>
-            )}
-          </tbody>
-        </table>
       </div>
     </div>
   );
