@@ -27,9 +27,9 @@ if sys.platform == "win32":
 
 # ── Configuration ──────────────────────────────────────────────────────
 RAILWAY_API = "https://backboard.railway.app/graphql/v2"
-RAILWAY_TOKEN = "ac7c7ba8-12aa-432d-8247-4242dadb240f"
-WORKSPACE_ID = "bf910a79-c1d7-4875-b04e-31e8ab76f3f0"
-PROJECT_NAME = "soothing-motivation"
+RAILWAY_TOKEN = os.getenv("RAILWAY_TOKEN", "")
+WORKSPACE_ID = os.getenv("RAILWAY_WORKSPACE_ID", "bf910a79-c1d7-4875-b04e-31e8ab76f3f0")
+PROJECT_NAME = os.getenv("RAILWAY_PROJECT_NAME", "soothing-motivation")
 
 # ANSI colors
 RED = "\033[91m"
@@ -40,6 +40,16 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 DIM = "\033[2m"
 
+
+if not RAILWAY_TOKEN:
+    print(
+        f"{RED}ERROR: RAILWAY_TOKEN environment variable is not set.\n"
+        f"Export it before running this script:\n"
+        f"  export RAILWAY_TOKEN=<your-railway-api-token>\n"
+        f"Obtain a token at: https://railway.app/account/tokens{RESET}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 _session = requests.Session()
 _session.headers.update({

@@ -102,6 +102,33 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Table init warning (OK if using Alembic): {e}")
 
+    # Auto-stamp Alembic if tables were created by create_all but alembic_version doesn't exist
+    try:
+        from sqlalchemy import text as _sa_text
+        from app.db import engine as _engine
+        if _engine is not None:
+            async with _engine.begin() as _conn:
+                _has_alembic = await _conn.execute(
+                    _sa_text(
+                        "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+                        "WHERE table_name='alembic_version')"
+                    )
+                )
+                if not _has_alembic.scalar():
+                    # Tables exist from create_all but alembic hasn't stamped — stamp to head
+                    import subprocess as _sp
+                    _result = _sp.run(
+                        ["alembic", "stamp", "head"],
+                        capture_output=True, text=True,
+                        cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    )
+                    if _result.returncode == 0:
+                        logger.info("Alembic stamped to head (tables pre-existed from create_all)")
+                    else:
+                        logger.warning(f"Alembic stamp failed (non-fatal): {_result.stderr[:200]}")
+    except Exception as _ae:
+        logger.warning(f"Alembic auto-stamp skipped: {_ae}")
+
     yield
     await db.disconnect()
 
@@ -173,14 +200,22 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 # ---------------------------------------------------------------------------
-# CORS — restricted to allowed origins from env
+# CORS — restricted to allowed origins from env; auto-adds Railway domains
 # ---------------------------------------------------------------------------
 _cors_default = "http://localhost:3000,http://localhost:8000"
-cors_origins = os.getenv("CORS_ORIGINS", _cors_default).split(",")
+cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", _cors_default).split(",") if o.strip()]
+# Auto-add Railway public domain if deployed on Railway
+_railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+if _railway_domain:
+    cors_origins.append(f"https://{_railway_domain}")
+# Auto-add Railway static domain patterns (e.g. *.up.railway.app)
+_railway_static = os.getenv("RAILWAY_STATIC_URL", "")
+if _railway_static:
+    cors_origins.append(_railway_static.rstrip("/"))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in cors_origins],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
@@ -452,6 +487,79 @@ async def dispatch_estimate(estimate_id: str, request: Request):
         pass  # Worker may not be running in dev mode
 
     return {"estimate_id": estimate_id, "status": "DISPATCHED"}
+
+
+@app.post("/api/v1/seed/al-kabir")
+async def seed_al_kabir_endpoint():
+    """
+    Seed the AL KABIR TOWER demonstration project.
+    Safe to call multiple times — idempotent, skips if already seeded.
+    """
+    from app.db.seed_al_kabir import seed_al_kabir
+    return await seed_al_kabir()
+
+
+@app.get("/api/v1/estimates/recent")
+async def recent_estimates_v1(request: Request):
+    """
+    Return the last 10 estimates with joined project info for the dashboard.
+    Accepts a Bearer token in the Authorization header; 401 if missing or invalid.
+    """
+    from app.db import AsyncSessionLocal
+    from app.models.orm_models import Estimate, Project, User
+    from sqlalchemy import select, desc
+    from jose import jwt as _jwt, JWTError as _JWTError
+    import os as _os
+
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    token = auth_header.split(" ", 1)[1]
+    _SECRET = _os.getenv("JWT_SECRET_KEY", "changethis_use_a_real_secret_in_production_64chars")
+    _ALGO = _os.getenv("JWT_ALGORITHM", "HS256")
+    try:
+        token_payload = _jwt.decode(token, _SECRET, algorithms=[_ALGO])
+        user_id = token_payload.get("sub")
+        if not user_id:
+            raise ValueError("No sub claim")
+    except (_JWTError, ValueError) as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    async with AsyncSessionLocal() as session:
+        user_result = await session.execute(select(User).where(User.id == user_id))
+        current_user = user_result.scalar_one_or_none()
+        if not current_user:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail="User not found")
+
+        query = (
+            select(Estimate, Project)
+            .join(Project, Estimate.project_id == Project.id)
+            .where(Estimate.tenant_id == current_user.tenant_id)
+            .order_by(desc(Estimate.created_at))
+            .limit(10)
+        )
+        result = await session.execute(query)
+        rows = result.all()
+
+    return [
+        {
+            "estimate_id": str(e.id),
+            "project_id": str(e.project_id),
+            "project_name": p.name or "",
+            "client_name": p.client_name or "",
+            "location": p.location_zone or "",
+            "status": e.status,
+            "progress_pct": e.progress_pct,
+            "current_step": e.current_step,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+            "bom_summary": (e.bom_output_json or {}).get("summary", {}),
+        }
+        for e, p in rows
+    ]
 
 
 @app.get("/api/dashboard/summary")

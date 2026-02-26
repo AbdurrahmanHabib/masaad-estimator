@@ -223,6 +223,55 @@ export default function LoginPage() {
                     'Sign In'
                   )}
                 </button>
+
+                {/* Demo Login shortcut for development */}
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={async () => {
+                    setEmail('admin@masaad.ae');
+                    setPassword('admin1234');
+                    setError(null);
+                    setLoading(true);
+                    try {
+                      const res = await fetch(`${BASE_URL}/api/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: 'admin@masaad.ae', password: 'admin1234' }),
+                      });
+                      if (!res.ok) {
+                        const data = await res.json().catch(() => ({}));
+                        throw new Error(data?.detail || data?.message || 'Demo login failed.');
+                      }
+                      const data = await res.json();
+                      const token: string = data.access_token ?? data.token;
+                      const user = data.user ?? {
+                        user_id: data.user_id,
+                        email: data.email,
+                        role: data.role,
+                        tenant_id: data.tenant_id,
+                        full_name: data.full_name,
+                      };
+                      if (!token) throw new Error('No token received.');
+                      login(token, user);
+                      router.replace('/');
+                    } catch (err: unknown) {
+                      setError(err instanceof Error ? err.message : 'Demo login failed.');
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="w-full mt-3 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-600 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2 border border-slate-200"
+                >
+                  {loading ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <>
+                      <span className="text-[10px] font-black text-slate-400">DEV</span>
+                      Demo Login
+                    </>
+                  )}
+                </button>
               </form>
             ) : (
               <form onSubmit={handleRegister} className="space-y-5">

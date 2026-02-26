@@ -1,6 +1,6 @@
 import './globals.css';
 import type { AppProps } from 'next/app';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Layout from '../components/Layout';
 import { useAuthStore } from '../store/useAuthStore';
@@ -12,21 +12,36 @@ function MyApp({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
-  useEffect(() => {
-    const isPublic = PUBLIC_PATHS.includes(router.pathname);
+  // mounted guard: prevents any auth-dependent rendering until client hydration
+  // is complete, eliminating React hydration mismatches with persisted Zustand state.
+  const [mounted, setMounted] = useState(false);
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const isPublic = PUBLIC_PATHS.includes(router.pathname);
     if (!isAuthenticated && !isPublic) {
       router.replace('/login');
     }
-  }, [isAuthenticated, router.pathname]);
+  }, [mounted, isAuthenticated, router.pathname]);
 
-  // Render login (and any future public pages) without the main Layout shell
+  // Render login (and any future public pages) without the main Layout shell.
+  // Safe to render before mount because login has no auth-dependent content.
   if (PUBLIC_PATHS.includes(router.pathname)) {
     return <Component {...pageProps} />;
   }
 
-  // While auth state is hydrating from localStorage, show a blank slate to
-  // avoid a flash of the protected UI before redirect fires.
+  // Before hydration is complete, show a minimal blank slate so React's
+  // server/client HTML match perfectly (avoids hydration warnings).
+  if (!mounted) {
+    return <div className="min-h-screen bg-[#f8fafc]" />;
+  }
+
+  // After hydration: if not authenticated redirect is in-flight — show dark
+  // overlay so there is no flash of the protected layout.
   if (!isAuthenticated) {
     return <div className="min-h-screen bg-[#1e293b]" />;
   }

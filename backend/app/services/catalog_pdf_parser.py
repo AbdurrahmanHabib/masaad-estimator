@@ -33,7 +33,10 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Literal
 
 import pdfplumber
-import fitz          # PyMuPDF
+try:
+    import fitz  # PyMuPDF — only needed for Stage 4 DXF pipeline
+except ImportError:
+    fitz = None  # Stage 4 DXF will be disabled; install PyMuPDF (pip install pymupdf) to enable
 import ezdxf
 from ezdxf.math import Vec2
 
@@ -59,7 +62,8 @@ OPTIONAL_SCORED_FIELDS: dict = {
 HITL_CONFIDENCE_THRESHOLD = 0.90
 
 # Render matrix for Vision LLM calls: 2× resolution (144 DPI effective)
-_RENDER_MATRIX = fitz.Matrix(2.0, 2.0)
+# Lazy init — fitz may not be installed in local dev (Python 3.14 compat issue)
+_RENDER_MATRIX = fitz.Matrix(2.0, 2.0) if fitz is not None else None
 _PIXELS_PER_PDF_UNIT = 2.0  # matches Matrix(2.0, 2.0)
 
 # Minimum number of non-trivial vector paths to consider a page as vector (not raster)
@@ -488,6 +492,9 @@ class CatalogPDFParser:
         self, pdf_bytes: bytes, page_num: int, material_type: MaterialType
     ) -> List[CatalogEntry]:
         """Render page to image, use Groq Vision for scanned/complex layouts."""
+        if fitz is None:
+            logger.warning("PyMuPDF not installed — vision render skipped (Stage 4 DXF disabled)")
+            return []
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             pix = doc[page_num].get_pixmap(matrix=_RENDER_MATRIX)
@@ -616,6 +623,12 @@ class CatalogPDFParser:
           success (bool), dxf_path, anchor_origin_xy, glazing_pocket_xy, bead_snap_xy,
           scale_factor, is_raster (bool), hitl_reason (str if raster)
         """
+        if fitz is None:
+            return {
+                "success": False,
+                "is_raster": True,
+                "hitl_reason": "PyMuPDF not installed — Stage 4 DXF pipeline disabled. Install pymupdf to enable.",
+            }
         try:
             fitz_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             page = fitz_doc[page_num]
@@ -798,6 +811,9 @@ Rules:
         dimension line endpoints.
         """
         if img_b64 is None:
+            if fitz is None:
+                logger.warning(f"PyMuPDF not installed — QA Agent render skipped for {item_code}")
+                return []
             try:
                 fitz_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
                 pix = fitz_doc[page_num].get_pixmap(matrix=_RENDER_MATRIX)

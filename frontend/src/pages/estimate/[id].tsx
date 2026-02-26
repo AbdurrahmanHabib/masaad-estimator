@@ -41,6 +41,8 @@ interface SSEProgress {
 interface EstimateDetail {
   estimate_id: string;
   project_id: string;
+  project_name?: string;
+  location?: string;
   status: string;
   progress_pct: number;
   current_step: string;
@@ -368,14 +370,14 @@ const EstimatePage = () => {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <h1 className="text-base font-black text-slate-800 uppercase tracking-tight">
-                {(estimate as any)?.project_name || `Estimate #${(estimate.estimate_id || '').slice(0, 8)}`}
+                {estimate.project_name || `Estimate #${(estimate.estimate_id || '').slice(0, 8)}`}
               </h1>
               <span className={`px-2 py-0.5 text-[9px] font-black uppercase tracking-widest rounded border ${STATUS_COLORS[currentStatus] || STATUS_COLORS['Queued']}`}>
                 {currentStatus}
               </span>
             </div>
             <div className="flex items-center gap-4 text-xs text-slate-500">
-              <span className="flex items-center gap-1"><MapPin size={12} /> {(estimate as any)?.location || 'UAE'}</span>
+              <span className="flex items-center gap-1"><MapPin size={12} /> {estimate.location || 'UAE'}</span>
               <span className="w-1 h-1 bg-slate-300 rounded-full" />
               <span className="flex items-center gap-1"><Clock size={12} /> Updated: {new Date().toLocaleDateString()}</span>
               {financialRates?.lme_aluminum_usd_mt && (

@@ -302,6 +302,47 @@ async def list_estimates(
     ]
 
 
+@router.get("/recent")
+async def recent_estimates(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return the last 10 estimates with joined project name, location, and status.
+    Used by the dashboard to populate the recent projects table.
+    Route: GET /api/ingestion/recent
+    Also accessible as GET /api/v1/estimates/recent via the alias registered in main.py.
+    """
+    from sqlalchemy import desc
+
+    query = (
+        select(Estimate, Project)
+        .join(Project, Estimate.project_id == Project.id)
+        .where(Estimate.tenant_id == current_user.tenant_id)
+        .order_by(desc(Estimate.created_at))
+        .limit(10)
+    )
+    result = await db.execute(query)
+    rows = result.all()
+
+    return [
+        {
+            "estimate_id": str(e.id),
+            "project_id": str(e.project_id),
+            "project_name": p.name or "",
+            "client_name": p.client_name or "",
+            "location": p.location_zone or "",
+            "status": e.status,
+            "progress_pct": e.progress_pct,
+            "current_step": e.current_step,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+            "bom_summary": (e.bom_output_json or {}).get("summary", {}),
+        }
+        for e, p in rows
+    ]
+
+
 @router.get("/estimate/{estimate_id}")
 async def get_estimate(
     estimate_id: str,
@@ -309,25 +350,45 @@ async def get_estimate(
     current_user: User = Depends(get_current_user),
 ):
     """Get full estimate data for the workspace."""
+    from app.models.orm_models import Project
+
     result = await db.execute(select(Estimate).where(Estimate.id == uuid.UUID(estimate_id)))
     estimate = result.scalar_one_or_none()
     if not estimate:
         raise HTTPException(404, "Estimate not found")
 
+    # Join with Project to get real name and location
+    project_name = ""
+    project_location = ""
+    proj_result = await db.execute(select(Project).where(Project.id == estimate.project_id))
+    project = proj_result.scalar_one_or_none()
+    if project:
+        project_name = project.name or ""
+        project_location = project.location_zone or ""
+
+    bom = estimate.bom_output_json or {}
+
     return {
         "estimate_id": str(estimate.id),
         "project_id": str(estimate.project_id),
+        "project_name": project_name,
+        "location": project_location,
         "status": estimate.status,
         "progress_pct": estimate.progress_pct,
         "current_step": estimate.current_step,
         "reasoning_log": estimate.reasoning_log or [],
         "project_scope": estimate.project_scope_json or {},
         "opening_schedule": estimate.opening_schedule_json or {},
-        "bom_output": estimate.bom_output_json or {},
+        "bom_output": bom,
         "cutting_list": estimate.cutting_list_json or {},
-        "boq": estimate.boq_json or {},
-        "rfi_register": estimate.rfi_register_json or [],
-        "ve_opportunities": estimate.ve_opportunities_json or [],
-        "structural_results": estimate.structural_results_json or [],
-        "financial_summary": estimate.financial_summary_json or {},
+        # boq: synthesise from bom_output_json fields for backward compat
+        "boq": {
+            "summary": bom.get("summary", {}),
+            "line_items": bom.get("items", []),
+            "financial_rates": bom.get("financial_rates", {}),
+        },
+        "rfi_register": [],
+        "ve_opportunities": bom.get("ve_opportunities", []),
+        "structural_results": bom.get("structural_results", []),
+        "financial_summary": bom.get("summary", estimate.financial_json or {}),
     }

@@ -16,28 +16,56 @@ Each node:
 """
 import json
 import logging
-from typing import Callable
+import time
+import traceback
+from typing import Callable, List
 from datetime import datetime, timezone
 
 from langgraph.graph import StateGraph, END
 
 from app.agents.graph_state import GraphState
+from app.agents.config import (
+    HITL_CONFIDENCE_THRESHOLD,
+    NODE_INDEX,
+    CHECKPOINT_CONFIG,
+)
 
 logger = logging.getLogger("masaad-estimator-graph")
 
-HITL_CONFIDENCE_THRESHOLD = 0.90
+# Keep module-level constant for backwards compat (config is canonical source)
+# HITL_CONFIDENCE_THRESHOLD imported from config above
 
 
 # ── Checkpoint helpers ─────────────────────────────────────────────────────────
 
 async def _checkpoint(state: GraphState, redis_client) -> None:
-    """Persist state to Redis with 24h TTL for crash recovery."""
+    """
+    Persist state to Redis with 24h TTL for crash recovery.
+
+    Key format: ckpt:{estimate_id}:{node_index:02d}:{node_name}
+    The zero-padded node index prefix ensures correct sort order on resume,
+    avoiding the prior bug where alphabetic sort returned wrong "latest" node.
+    """
     if redis_client is None:
         return
-    key = f"ckpt:{state['estimate_id']}:{state['current_node']}"
+    node_name = state.get("current_node", "unknown")
+    node_idx = NODE_INDEX.get(node_name, 99)
+    key = CHECKPOINT_CONFIG["key_format"].format(  # type: ignore[index]
+        estimate_id=state["estimate_id"],
+        node_index=node_idx,
+        node_name=node_name,
+    )
     try:
-        serializable = {k: v for k, v in state.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
-        await redis_client.set(key, json.dumps(serializable), ex=86400)
+        serializable = {
+            k: v for k, v in state.items()
+            if isinstance(v, (str, int, float, bool, list, dict, type(None)))
+        }
+        await redis_client.set(
+            key,
+            json.dumps(serializable),
+            ex=int(CHECKPOINT_CONFIG["ttl_seconds"]),  # type: ignore[arg-type]
+        )
+        logger.debug(f"Checkpoint written: {key}")
     except Exception as e:
         logger.warning(f"Checkpoint write failed: {e}")
 
@@ -45,7 +73,10 @@ async def _checkpoint(state: GraphState, redis_client) -> None:
 async def load_checkpoint(estimate_id: str, redis_client) -> GraphState | None:
     """
     Load the most recent checkpoint for an estimate.
-    Returns None if no checkpoint exists (fresh run).
+
+    Keys are formatted as ckpt:{estimate_id}:{node_index:02d}:{node_name}
+    so lexicographic sort == pipeline execution order. Returns None if no
+    checkpoint exists (fresh run).
     """
     if redis_client is None:
         return None
@@ -54,9 +85,11 @@ async def load_checkpoint(estimate_id: str, redis_client) -> GraphState | None:
         keys = await redis_client.keys(pattern)
         if not keys:
             return None
-        latest = sorted(keys)[-1]
+        # Sort is now correct: "ckpt:X:00:Ingestion" < "ckpt:X:06:Pricing"
+        latest = sorted(k.decode() if isinstance(k, bytes) else k for k in keys)[-1]
         raw = await redis_client.get(latest)
         if raw:
+            logger.info(f"[{estimate_id}] Resuming from checkpoint: {latest}")
             return json.loads(raw)
     except Exception as e:
         logger.warning(f"Checkpoint load failed: {e}")
@@ -81,27 +114,130 @@ async def _persist_estimate(estimate_id: str, updates: dict) -> None:
         logger.warning(f"DB persist failed for {estimate_id}: {e}")
 
 
-# ── Node factory ───────────────────────────────────────────────────────────────
+# ── SafeNodeWrapper ─────────────────────────────────────────────────────────────
 
-def make_node(name: str, progress: int, impl: Callable | None = None):
+class NodeError:
+    """Structured error record from a node failure."""
+    __slots__ = ("node_name", "message", "traceback_str", "timestamp")
+
+    def __init__(self, node_name: str, exc: Exception) -> None:
+        self.node_name = node_name
+        self.message = str(exc)
+        self.traceback_str = traceback.format_exc()
+        self.timestamp = datetime.now(timezone.utc).isoformat()
+
+    def to_dict(self) -> dict:
+        return {
+            "node": self.node_name,
+            "error": self.message,
+            "traceback": self.traceback_str,
+            "at": self.timestamp,
+        }
+
+
+def make_node(
+    name: str,
+    progress: int,
+    impl: Callable | None = None,
+    redis_client=None,
+    critical: bool = False,
+):
     """
-    Factory: wraps an implementation function with checkpoint + progress tracking.
-    If impl is None, the node is a passthrough stub.
+    SafeNodeWrapper factory.
+
+    Wraps an implementation function with:
+    1. Progress tracking (state.current_node, state.progress_pct)
+    2. Exception catching — sets state.error + state.error_node, does NOT halt graph
+       UNLESS critical=True, in which case the node failure forces status=REVIEW_REQUIRED
+       and sets hitl_pending=True so the next conditional edge routes to HITL.
+    3. Error accumulation — appends to state.error_log list (all node errors preserved,
+       never overwritten — every failing node's error is visible in state.error_log).
+    4. Performance monitoring — records wall-clock time per node in state.perf_monitor.
+    5. Redis checkpointing — writes state after every node when redis_client is supplied.
+       The key format is ckpt:{estimate_id}:{node_index:02d}:{node_name} so lexicographic
+       sort on the key prefix gives correct pipeline order on resume.
+    6. DB persistence — updates Estimate row progress_pct and current_step.
+
+    If impl is None, the node is a passthrough stub (for future nodes).
+
+    Args:
+        name:         Node name matching NODE_ORDER in config.py
+        progress:     Progress percentage (0-100) to set in state
+        impl:         Async implementation coroutine (state -> state)
+        redis_client: Async Redis client for checkpointing (None = skip checkpoint)
+        critical:     If True, a node exception forces hitl_pending=True and
+                      status=REVIEW_REQUIRED so the pipeline routes to HITL triage
+                      rather than proceeding blindly with corrupt / empty data.
     """
     async def node(state: GraphState) -> GraphState:
+        estimate_id = state.get("estimate_id", "unknown")
         state["current_node"] = name
         state["progress_pct"] = progress
-        logger.info(f"[{state['estimate_id']}] Entering {name} ({progress}%)")
+
+        # Initialise accumulator fields on first node to run
+        if not isinstance(state.get("error_log"), list):
+            state["error_log"] = []  # type: ignore[typeddict-unknown-key]
+        if not isinstance(state.get("perf_monitor"), dict):
+            state["perf_monitor"] = {}  # type: ignore[typeddict-unknown-key]
+
+        logger.info(f"[{estimate_id}] --> {name} ({progress}%)")
+        t_start = time.monotonic()
+        node_ok = True
 
         if impl is not None:
             try:
                 state = await impl(state)
-            except Exception as e:
-                state["error"] = str(e)
+            except Exception as exc:
+                node_ok = False
+                err = NodeError(name, exc)
+
+                # ── Single-error fields (backwards compat) ──────────────────
+                state["error"] = err.message
                 state["error_node"] = name
-                logger.error(f"[{state['estimate_id']}] {name} failed: {e}", exc_info=True)
+
+                # ── Error log accumulates ALL node failures (never overwrites) ──
+                error_log: List[dict] = list(state.get("error_log") or [])  # type: ignore[arg-type]
+                error_log.append(err.to_dict())
+                state["error_log"] = error_log  # type: ignore[typeddict-unknown-key]
+
+                logger.error(
+                    f"[{estimate_id}] {name} FAILED: {exc}",
+                    exc_info=True,
+                )
+
+                # ── Critical node failure: force HITL triage ─────────────────
+                # Without this guard a failed BOMNode (zero BOM items) would
+                # allow PricingNode to produce a valid-looking AED 0 quote.
+                if critical:
+                    state["hitl_pending"] = True
+                    state["status"] = "REVIEW_REQUIRED"
+                    existing_triage: List[str] = list(state.get("hitl_triage_ids") or [])
+                    triage_id = f"node_failure_{name}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+                    existing_triage.append(triage_id)
+                    state["hitl_triage_ids"] = existing_triage
+                    logger.warning(
+                        f"[{estimate_id}] {name} is CRITICAL — forcing HITL triage (id={triage_id})"
+                    )
+
+        elapsed_ms = round((time.monotonic() - t_start) * 1000, 1)
+        perf: dict = dict(state.get("perf_monitor") or {})  # type: ignore[arg-type]
+        perf[name] = {
+            "elapsed_ms": elapsed_ms,
+            "success": node_ok,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        state["perf_monitor"] = perf  # type: ignore[typeddict-unknown-key]
 
         state["last_completed_node"] = name
+        logger.info(
+            f"[{estimate_id}] <-- {name} {'OK' if node_ok else 'ERROR'} ({elapsed_ms}ms)"
+        )
+
+        # ── Redis checkpoint after every node ─────────────────────────────────
+        # redis_client is injected by build_estimator_graph() at compile time.
+        if redis_client is not None:
+            await _checkpoint(state, redis_client)
+
         return state
 
     node.__name__ = name
@@ -144,24 +280,27 @@ async def _ingestion_impl(state: GraphState) -> GraphState:
         "error": None,
     }
 
-    try:
-        result = await ingestion_app.ainvoke(ingestion_input)
-        opening_schedule = result.get("opening_schedule", {})
-        openings = opening_schedule.get("schedule", [])
+    # NOTE: This try/except handles only the ingestion sub-graph's own partial
+    # failures (e.g., DWG parse OK but zero openings found). Fatal exceptions
+    # (ImportError, network errors, etc.) are intentionally re-raised so the
+    # outer make_node() SafeNodeWrapper catches them, sets state["error"] /
+    # state["error_node"], and (because IngestionNode is critical=True) forces
+    # hitl_pending=True. Do NOT wrap the entire function in a bare except.
+    result = await ingestion_app.ainvoke(ingestion_input)
+    opening_schedule = result.get("opening_schedule", {})
+    openings = opening_schedule.get("schedule", [])
 
-        state["extracted_openings"] = openings
-        state["spec_text"] = result.get("spec_text", spec_text)
+    state["extracted_openings"] = openings
+    state["spec_text"] = result.get("spec_text", spec_text)
 
-        logger.info(f"[{estimate_id}] IngestionNode: {len(openings)} openings extracted")
+    logger.info(f"[{estimate_id}] IngestionNode: {len(openings)} openings extracted")
 
-        if result.get("error"):
-            logger.warning(f"[{estimate_id}] Ingestion sub-graph error: {result['error']}")
-            state["confidence_score"] = min(state.get("confidence_score", 1.0), 0.75)
-
-    except Exception as e:
-        logger.error(f"[{estimate_id}] Ingestion sub-graph failed: {e}")
-        state["extracted_openings"] = []
-        state["confidence_score"] = min(state.get("confidence_score", 1.0), 0.60)
+    # Sub-graph reported a soft error (e.g., unrecognised DWG layer naming).
+    # Reduce confidence but do NOT raise — the estimate can continue with fewer
+    # openings and the HITL conditional will fire if confidence drops below 0.90.
+    if result.get("error"):
+        logger.warning(f"[{estimate_id}] Ingestion sub-graph soft error: {result['error']}")
+        state["confidence_score"] = min(state.get("confidence_score", 1.0), 0.75)
 
     await _persist_estimate(estimate_id, {
         "status": "ESTIMATING",
@@ -776,44 +915,46 @@ async def _compliance_impl(state: GraphState) -> GraphState:
         building_type = "commercial_office"
         occupancy = "commercial_office"
 
-    try:
-        report = run_compliance_checks(
-            bom_items=bom_items,
-            catalog_matches=catalog_matches,
-            spec_text=spec_text,
-            building_type=building_type,
-            building_occupancy=occupancy,
+    # NOTE: Fatal exceptions from run_compliance_checks() are intentionally
+    # NOT caught here. They propagate to the make_node() SafeNodeWrapper which
+    # records them in state["error_log"] and (because ComplianceNode is NOT
+    # marked critical=True) allows the pipeline to continue to ApprovalGateway,
+    # where the missing compliance_report will be visible to the approver.
+    # This is preferable to silently recording {"overall_passed": None} which
+    # looks like a compliance result rather than an engine crash.
+    report = run_compliance_checks(
+        bom_items=bom_items,
+        catalog_matches=catalog_matches,
+        spec_text=spec_text,
+        building_type=building_type,
+        building_occupancy=occupancy,
+    )
+    report_dict = report_to_dict(report)
+    state["compliance_report"] = report_dict
+
+    # Auto-add compliance RFIs to rfi_log
+    from app.services.commercial_director import create_rfi_log_entry
+    rfi_log = list(state.get("rfi_log") or [])
+    for rfi_text in report.rfi_items:
+        rfi_log.append(create_rfi_log_entry(
+            rfi_text=rfi_text,
+            source="compliance",
+            estimate_id=estimate_id,
+            reference="Phase3B-Compliance",
+        ))
+    state["rfi_log"] = rfi_log
+
+    # Cap confidence if compliance fails
+    if not report.overall_passed:
+        state["confidence_score"] = min(
+            state.get("confidence_score", 1.0), 0.80
         )
-        report_dict = report_to_dict(report)
-        state["compliance_report"] = report_dict
-
-        # Auto-add compliance RFIs to rfi_log
-        from app.services.commercial_director import create_rfi_log_entry
-        rfi_log = list(state.get("rfi_log") or [])
-        for rfi_text in report.rfi_items:
-            rfi_log.append(create_rfi_log_entry(
-                rfi_text=rfi_text,
-                source="compliance",
-                estimate_id=estimate_id,
-                reference="Phase3B-Compliance",
-            ))
-        state["rfi_log"] = rfi_log
-
-        # Cap confidence if compliance fails
-        if not report.overall_passed:
-            state["confidence_score"] = min(
-                state.get("confidence_score", 1.0), 0.80
-            )
-            logger.warning(
-                f"[{estimate_id}] ComplianceNode: FAILED — "
-                f"{len(report.summary_flags)} flags, {len(report.rfi_items)} RFIs"
-            )
-        else:
-            logger.info(f"[{estimate_id}] ComplianceNode: PASSED — all C1/C2/C3 checks OK")
-
-    except Exception as e:
-        logger.error(f"[{estimate_id}] ComplianceNode failed: {e}")
-        state["compliance_report"] = {"overall_passed": None, "error": str(e)}
+        logger.warning(
+            f"[{estimate_id}] ComplianceNode: FAILED — "
+            f"{len(report.summary_flags)} flags, {len(report.rfi_items)} RFIs"
+        )
+    else:
+        logger.info(f"[{estimate_id}] ComplianceNode: PASSED — all C1/C2/C3 checks OK")
 
     await _persist_estimate(estimate_id, {"current_step": "Compliance checks complete", "progress_pct": 78})
     return state
@@ -973,21 +1114,44 @@ def is_approved(state: GraphState) -> str:
 
 # ── Graph construction ─────────────────────────────────────────────────────────
 
-def build_estimator_graph() -> StateGraph:
+def build_estimator_graph(redis_client=None):
+    """
+    Compile the estimator StateGraph.
+
+    Args:
+        redis_client: Optional async Redis client (aioredis / redis.asyncio).
+                      When provided, every node checkpoints state to Redis after
+                      completion using the key format:
+                          ckpt:{estimate_id}:{node_index:02d}:{node_name}
+                      Pass None (default) to disable Redis checkpointing (e.g.
+                      for unit tests or local runs without Redis).
+
+    Critical nodes (critical=True):
+        IngestionNode — without openings the entire pipeline is meaningless.
+        BOMNode       — zero BOM items → pricing produces AED 0 silently.
+
+    Non-critical nodes (default critical=False):
+        All others — failures are logged in state.error_log and the pipeline
+        continues to ApprovalGateway where the approver sees the error context.
+    """
     graph = StateGraph(GraphState)
 
-    graph.add_node("IngestionNode",            make_node("IngestionNode", 5, _ingestion_impl))
-    graph.add_node("ScopeIdentificationNode",  make_node("ScopeIdentificationNode", 15, _scope_impl))
-    graph.add_node("GeometryQANode",           make_node("GeometryQANode", 22, _geometry_qa_impl))
-    graph.add_node("BOMNode",                  make_node("BOMNode", 30, _bom_impl))
-    graph.add_node("HITLTriageNode",           make_node("HITLTriageNode", 35, _hitl_triage_impl))
-    graph.add_node("DeltaCompareNode",         make_node("DeltaCompareNode", 45, _delta_compare_impl))
-    graph.add_node("PricingNode",              make_node("PricingNode", 60, _pricing_impl))
-    graph.add_node("CommercialNode",           make_node("CommercialNode", 75, _commercial_impl))
-    graph.add_node("ComplianceNode",           make_node("ComplianceNode", 78, _compliance_impl))
-    graph.add_node("InternationalRoutingNode", make_node("InternationalRoutingNode", 80, _international_routing_impl))
-    graph.add_node("ApprovalGatewayNode",      make_node("ApprovalGatewayNode", 85, _approval_gateway_impl))
-    graph.add_node("ReportNode",               make_node("ReportNode", 95, _report_impl))
+    def _n(name, progress, impl, *, critical=False):
+        """Helper: creates a make_node with shared redis_client injected."""
+        return make_node(name, progress, impl, redis_client=redis_client, critical=critical)
+
+    graph.add_node("IngestionNode",            _n("IngestionNode", 5,  _ingestion_impl,             critical=True))
+    graph.add_node("ScopeIdentificationNode",  _n("ScopeIdentificationNode", 15, _scope_impl))
+    graph.add_node("GeometryQANode",           _n("GeometryQANode", 22, _geometry_qa_impl))
+    graph.add_node("BOMNode",                  _n("BOMNode", 30, _bom_impl,                         critical=True))
+    graph.add_node("HITLTriageNode",           _n("HITLTriageNode", 35, _hitl_triage_impl))
+    graph.add_node("DeltaCompareNode",         _n("DeltaCompareNode", 45, _delta_compare_impl))
+    graph.add_node("PricingNode",              _n("PricingNode", 60, _pricing_impl))
+    graph.add_node("CommercialNode",           _n("CommercialNode", 75, _commercial_impl))
+    graph.add_node("ComplianceNode",           _n("ComplianceNode", 80, _compliance_impl))
+    graph.add_node("InternationalRoutingNode", _n("InternationalRoutingNode", 83, _international_routing_impl))
+    graph.add_node("ApprovalGatewayNode",      _n("ApprovalGatewayNode", 85, _approval_gateway_impl))
+    graph.add_node("ReportNode",               _n("ReportNode", 95, _report_impl))
 
     graph.set_entry_point("IngestionNode")
 
@@ -995,6 +1159,8 @@ def build_estimator_graph() -> StateGraph:
     graph.add_edge("ScopeIdentificationNode", "GeometryQANode")
     graph.add_edge("GeometryQANode", "BOMNode")
 
+    # Post-BOM: route to HITL if confidence < 0.90 or hitl_pending == True.
+    # This also catches critical=True node failures where hitl_pending was forced.
     graph.add_conditional_edges(
         "BOMNode",
         should_triage,
@@ -1005,6 +1171,11 @@ def build_estimator_graph() -> StateGraph:
     graph.add_edge("PricingNode", "CommercialNode")
     graph.add_edge("CommercialNode", "ComplianceNode")
 
+    # Post-compliance: route to international node or directly to approval.
+    # NOTE: should_triage_post_compliance() is defined but intentionally NOT wired
+    # here (see ARCHITECTURE_REVIEW.md §1.1). The compliance confidence cap and
+    # rfi_log entries are sufficient — a second HITL loop after compliance would
+    # require LangGraph interrupt_before support and a resume endpoint.
     graph.add_conditional_edges(
         "ComplianceNode",
         should_route_international,
@@ -1012,6 +1183,9 @@ def build_estimator_graph() -> StateGraph:
     )
     graph.add_edge("InternationalRoutingNode", "ApprovalGatewayNode")
 
+    # Approval gateway: halts if not yet APPROVED (returns END).
+    # Resume is triggered by POST /api/v1/estimates/{id}/approve, which must
+    # re-invoke the compiled graph with the checkpointed state.
     graph.add_conditional_edges(
         "ApprovalGatewayNode",
         is_approved,
@@ -1022,5 +1196,8 @@ def build_estimator_graph() -> StateGraph:
     return graph.compile()
 
 
-# Singleton compiled graph
+# Module-level singleton compiled without Redis (safe for import-time use).
+# Production callers should build their own instance with redis_client:
+#   from app.agents.estimator_graph import build_estimator_graph
+#   graph = build_estimator_graph(redis_client=redis)
 estimator_graph = build_estimator_graph()
