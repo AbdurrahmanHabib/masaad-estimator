@@ -1,0 +1,87 @@
+{
+  "mcp_server": {
+    "name": "dive-memory",
+    "version": "3.0.0",
+    "transport": "stdio",
+    "description": "Persistent memory system for AI agents"
+  },
+  "storage": {
+    "backend": "sqlite",
+    "path": "~/.dive-memory/memories.db",
+    "cloud_sync": {
+      "enabled": false,
+      "provider": "s3",
+      "bucket": "dive-memory-sync",
+      "region": "us-east-1",
+      "auto_sync": false,
+      "sync_interval_minutes": 30
+    }
+  },
+  "embeddings": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "batch_size": 100,
+    "cache_enabled": true,
+    "fallback_provider": "local"
+  },
+  "search": {
+    "strategy": "hybrid",
+    "semantic_weight": 0.7,
+    "keyword_weight": 0.3,
+    "top_k": 10,
+    "min_score": 0.3,
+    "boost_by_importance": true,
+    "boost_by_recency": false
+  },
+  "deduplication": {
+    "enabled": true,
+    "similarity_threshold": 0.95,
+    "auto_merge": false,
+    "merge_strategy": "keep_newer",
+    "check_interval_hours": 24
+  },
+  "graph": {
+    "auto_link": true,
+    "link_threshold": 0.7,
+    "max_links_per_memory": 10,
+    "relationship_types": [
+      "related_to",
+      "depends_on",
+      "contradicts",
+      "extends"
+    ]
+  },
+  "context_injection": {
+    "enabled": false,
+    "max_memories": 5,
+    "min_relevance": 0.5,
+    "include_metadata": true,
+    "format": "markdown"
+  },
+  "memory_management": {
+    "pruning": {
+      "enabled": false,
+      "min_importance": 3,
+      "max_age_days": 90,
+      "min_access_count": 2
+    },
+    "consolidation": {
+      "enabled": false,
+      "similarity_threshold": 0.85,
+      "strategy": "llm_summary"
+    }
+  },
+  "performance": {
+    "cache_size_mb": 100,
+    "max_concurrent_searches": 10,
+    "embedding_timeout_seconds": 30,
+    "search_timeout_seconds": 5
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "~/.dive-memory/logs/dive-memory.log",
+    "max_size_mb": 10,
+    "backup_count": 5
+  }
+}

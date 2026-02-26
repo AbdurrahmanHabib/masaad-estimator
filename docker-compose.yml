@@ -2,38 +2,149 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: masaad_db
     restart: always
     environment:
       POSTGRES_USER: masaad_admin
-      POSTGRES_PASSWORD: password123 # CHANGE THIS in your .env file
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password123}
       POSTGRES_DB: masaad_estimator
     volumes:
-      - ./postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U masaad_admin -d masaad_estimator"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: masaad_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migration:
+    build: ./backend
+    container_name: masaad_migration
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://masaad_admin:${POSTGRES_PASSWORD:-password123}@db:5432/masaad_estimator
+      DATABASE_URL_SYNC: postgresql://masaad_admin:${POSTGRES_PASSWORD:-password123}@db:5432/masaad_estimator
+    depends_on:
+      db:
+        condition: service_healthy
 
   backend:
     build: ./backend
     container_name: masaad_backend
     restart: always
     environment:
-      DATABASE_URL: postgresql://masaad_admin:password123@db:5432/masaad_estimator
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DATABASE_URL: postgresql+asyncpg://masaad_admin:${POSTGRES_PASSWORD:-password123}@db:5432/masaad_estimator
+      DATABASE_URL_SYNC: postgresql://masaad_admin:${POSTGRES_PASSWORD:-password123}@db:5432/masaad_estimator
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-groq/llama-3.1-70b-versatile}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gemini/gemini-1.5-flash}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-changethis64charrand0mstringforprod}
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      UPLOAD_DIR: /app/uploads
+      DOWNLOAD_DIR: /app/downloads
+      METALS_API_KEY: ${METALS_API_KEY:-}
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      DXF_OUTPUT_DIR: /app/dxf_output
+    volumes:
+      - uploads_data:/app/uploads
+      - downloads_data:/app/downloads
+      - dxf_output:/app/dxf_output
     depends_on:
-      - db
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     ports:
       - "8000:8000"
 
+  celery_worker:
+    build: ./backend
+    container_name: masaad_celery
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+    restart: always
+    environment:
+      DATABASE_URL: postgresql+asyncpg://masaad_admin:${POSTGRES_PASSWORD:-password123}@db:5432/masaad_estimator
+      DATABASE_URL_SYNC: postgresql://masaad_admin:${POSTGRES_PASSWORD:-password123}@db:5432/masaad_estimator
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      LLM_PRIMARY_MODEL: ${LLM_PRIMARY_MODEL:-groq/llama-3.1-70b-versatile}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-gemini/gemini-1.5-flash}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-changethis64charrand0mstringforprod}
+      UPLOAD_DIR: /app/uploads
+      DOWNLOAD_DIR: /app/downloads
+      METALS_API_KEY: ${METALS_API_KEY:-}
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      DXF_OUTPUT_DIR: /app/dxf_output
+    volumes:
+      - uploads_data:/app/uploads
+      - downloads_data:/app/downloads
+      - dxf_output:/app/dxf_output
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery_beat:
+    build: ./backend
+    container_name: masaad_celery_beat
+    command: celery -A app.workers.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler
+    restart: always
+    environment:
+      DATABASE_URL: postgresql+asyncpg://masaad_admin:${POSTGRES_PASSWORD:-password123}@db:5432/masaad_estimator
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      METALS_API_KEY: ${METALS_API_KEY:-}
+      FRED_API_KEY: ${FRED_API_KEY:-}
+    volumes:
+      - celerybeat_data:/app/celerybeat
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
-    build: 
+    build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: http://YOUR_OCI_PUBLIC_IP:8000
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     container_name: masaad_frontend
     restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
-      - "80:3000"
+      - "3000:3000"
     depends_on:
       - backend
+
+volumes:
+  postgres_data:
+  uploads_data:
+  downloads_data:
+  dxf_output:
+  celerybeat_data:

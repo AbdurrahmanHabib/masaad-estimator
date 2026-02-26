@@ -4,7 +4,8 @@ python-multipart==0.0.6
 websockets==12.0
 asyncpg==0.29.0
 sqlalchemy[asyncio]==2.0.25
-langgraph==0.0.24
+alembic==1.13.1
+langgraph==0.2.28
 litellm==1.25.0
 ezdxf==1.1.0
 PyMuPDF==1.23.8
@@ -15,6 +16,15 @@ pandas==2.2.0
 python-dotenv==1.0.1
 python-jose[cryptography]
 passlib[bcrypt]
-ultralytics==8.1.0
 shapely==2.0.3
 pdfplumber==0.10.3
+celery==5.3.6
+redis==5.0.1
+httpx==0.26.0
+python-docx==1.1.0
+openpyxl==3.1.2
+reportlab==4.1.0
+svglib==1.5.1
+xlsxwriter==3.1.9
+aiofiles==23.2.1
+pillow==10.2.0
