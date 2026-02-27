@@ -64,6 +64,27 @@ async def init_db():
             _migrations = [
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS client_name VARCHAR(255)",
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Active'",
+                # Tenant columns added after initial schema
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS company_name VARCHAR(255) DEFAULT 'Madinat Al Saada'",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS theme_color_hex VARCHAR(10) DEFAULT '#002147'",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS base_currency VARCHAR(3) DEFAULT 'AED'",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS monthly_factory_overhead NUMERIC(14,2) DEFAULT 200000",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS default_factory_burn_rate NUMERIC(14,2) DEFAULT 13.00",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS report_header_text VARCHAR(255)",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS report_footer_text VARCHAR(255)",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS company_address VARCHAR(500)",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS company_phone VARCHAR(50)",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS company_email VARCHAR(255)",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS company_po_box VARCHAR(50)",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS company_cr_number VARCHAR(50)",
+                "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS company_trn VARCHAR(50)",
+                # Estimate approval columns
+                "ALTER TABLE estimates ADD COLUMN IF NOT EXISTS approved_by VARCHAR(255)",
+                "ALTER TABLE estimates ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP",
+                # Financial rates columns
+                "ALTER TABLE financial_rates ADD COLUMN IF NOT EXISTS baseline_labor_burn_rate_aed NUMERIC(14,2) DEFAULT 13.00",
+                "ALTER TABLE financial_rates ADD COLUMN IF NOT EXISTS burn_rate_last_updated TIMESTAMP",
+                "ALTER TABLE financial_rates ADD COLUMN IF NOT EXISTS burn_rate_updated_by_source VARCHAR(50) DEFAULT 'manual'",
             ]
             for sql in _migrations:
                 try:
@@ -71,23 +92,26 @@ async def init_db():
                 except Exception:
                     pass  # Column already exists or table not yet created
 
-        # Run seed data SQL (idempotent — all INSERTs use ON CONFLICT)
-        seed_path = os.path.join(os.path.dirname(__file__), "seed_data.sql")
-        if os.path.exists(seed_path):
-            try:
-                with open(seed_path, "r") as f:
-                    seed_sql = f.read()
-                # Execute each statement separately (split on semicolons)
-                for stmt in seed_sql.split(";"):
-                    stmt = stmt.strip()
-                    if stmt and not stmt.startswith("--"):
-                        try:
-                            await conn.execute(__import__('sqlalchemy').text(stmt))
-                        except Exception as seed_err:
-                            logger.debug("Seed statement skipped: %s", seed_err)
-                logger.info("Seed data applied.")
-            except Exception as seed_err:
-                logger.warning("Seed data failed: %s", seed_err)
+            # Run seed data SQL (idempotent — all INSERTs use ON CONFLICT)
+            seed_path = os.path.join(os.path.dirname(__file__), "seed_data.sql")
+            if os.path.exists(seed_path):
+                try:
+                    with open(seed_path, "r") as f:
+                        seed_sql = f.read()
+                    # Strip SQL comments, then split on semicolons
+                    import re as _re
+                    # Remove line comments
+                    cleaned = _re.sub(r'--[^\n]*', '', seed_sql)
+                    for stmt in cleaned.split(";"):
+                        stmt = stmt.strip()
+                        if stmt:
+                            try:
+                                await conn.execute(__import__('sqlalchemy').text(stmt))
+                            except Exception as seed_err:
+                                logger.debug("Seed statement skipped: %s", seed_err)
+                    logger.info("Seed data applied.")
+                except Exception as seed_err:
+                    logger.warning("Seed data failed: %s", seed_err)
 
         logger.info("Database tables initialized.")
     except Exception as e:
