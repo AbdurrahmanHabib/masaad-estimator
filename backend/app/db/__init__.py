@@ -93,19 +93,29 @@ async def init_db():
                     pass  # Column already exists or table not yet created
 
         # Run seed data SQL using raw asyncpg (avoids SQLAlchemy text() interpreting
-        # $ signs in bcrypt hashes as bind parameters)
+        # $ signs in bcrypt hashes as bind parameters).
+        # Execute each statement separately so one failure doesn't roll back the rest.
         seed_path = os.path.join(os.path.dirname(__file__), "seed_data.sql")
         _db_url = os.getenv("DATABASE_URL", "")
         if os.path.exists(seed_path) and _db_url:
             try:
                 with open(seed_path, "r") as f:
                     seed_sql = f.read()
+                import re as _re
+                # Remove SQL line comments
+                cleaned = _re.sub(r'--[^\n]*', '', seed_sql)
                 # asyncpg needs postgresql:// not postgresql+asyncpg://
                 _raw_url = _db_url.replace("postgresql+asyncpg://", "postgresql://")
                 import asyncpg as _apg
                 _raw_conn = await _apg.connect(_raw_url)
                 try:
-                    await _raw_conn.execute(seed_sql)
+                    for stmt in cleaned.split(";"):
+                        stmt = stmt.strip()
+                        if stmt:
+                            try:
+                                await _raw_conn.execute(stmt)
+                            except Exception as stmt_err:
+                                logger.debug("Seed stmt skipped: %s", str(stmt_err)[:120])
                     logger.info("Seed data applied.")
                 finally:
                     await _raw_conn.close()

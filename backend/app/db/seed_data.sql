@@ -32,8 +32,8 @@ FROM tenants WHERE slug = 'masaad'
 ON CONFLICT DO NOTHING;
 
 -- 4. Material rates for masaad tenant (defaults — admin will update)
-INSERT INTO material_rates (tenant_id)
-SELECT id FROM tenants WHERE slug = 'masaad'
+INSERT INTO material_rates (id, tenant_id)
+SELECT gen_random_uuid(), id FROM tenants WHERE slug = 'masaad'
 ON CONFLICT (tenant_id) DO NOTHING;
 
 -- 5. Default admin user (admin@madinatalsaada.ae / admin1234)
