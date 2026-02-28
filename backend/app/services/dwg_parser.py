@@ -765,6 +765,12 @@ class DWGParserService:
             for eidx in entity_indices:
                 entity_to_cluster[eidx] = cluster_id
 
+        # Classify clusters as plan/elevation/section
+        cluster_classification = self._classify_clusters(clusters, entity_bounds_for_clustering)
+
+        # Detect Paper Space layout views
+        paper_space_views = self._detect_paper_space_views(doc)
+
         # ── Deduplicate panels with spatial-cluster awareness ─────────────────
         # When multiple spatial clusters exist (overlapping drawing views),
         # the same panel may appear in each view. We count per-cluster first,
@@ -908,8 +914,97 @@ class DWGParserService:
                 "spatial_clusters": len(clusters),
                 "unique_blocks": len(all_blocks),
                 "unique_layers": self._count_layers(doc),
+                "cluster_classification": cluster_classification,
+                "paper_space_views": paper_space_views,
+                "entity_to_cluster": {str(k): v for k, v in entity_to_cluster.items()},
             },
         }
+
+    def _classify_clusters(self, clusters: list[list[int]], entity_bounds: list[tuple[int, BoundsInfo]]) -> list[dict]:
+        """Classify each spatial cluster as plan/elevation/section based on geometry."""
+        bounds_map = {idx: b for idx, b in entity_bounds}
+
+        classified = []
+        for i, cluster_indices in enumerate(clusters):
+            min_x = min_y = float('inf')
+            max_x = max_y = float('-inf')
+            for eidx in cluster_indices:
+                b = bounds_map.get(eidx)
+                if b:
+                    min_x = min(min_x, b.min_x)
+                    min_y = min(min_y, b.min_y)
+                    max_x = max(max_x, b.max_x)
+                    max_y = max(max_y, b.max_y)
+
+            if min_x == float('inf'):
+                continue
+
+            width = max_x - min_x
+            height = max_y - min_y
+            aspect = width / max(height, 1)
+
+            if aspect > 2.5:
+                view_type = "plan"
+            elif aspect < 0.4:
+                view_type = "section"
+            else:
+                view_type = "elevation"
+
+            classified.append({
+                "cluster_index": i,
+                "view_type": view_type,
+                "bbox": {"min_x": round(min_x, 2), "min_y": round(min_y, 2),
+                         "max_x": round(max_x, 2), "max_y": round(max_y, 2)},
+                "aspect_ratio": round(aspect, 3),
+                "entity_count": len(cluster_indices),
+                "center_x": (min_x + max_x) / 2,
+            })
+
+        elevations = [c for c in classified if c["view_type"] == "elevation"]
+        elevations.sort(key=lambda c: c["center_x"])
+        for idx, elev in enumerate(elevations):
+            elev["elevation_code"] = f"E{idx + 1}"
+
+        return classified
+
+    def _detect_paper_space_views(self, doc) -> list[dict]:
+        """Detect view types from Paper Space layout names."""
+        views = []
+        try:
+            for layout in doc.layouts:
+                if layout.name == "Model":
+                    continue
+                name_lower = layout.name.lower()
+                view_type = None
+                elevation_direction = None
+
+                if any(kw in name_lower for kw in ["plan", "floor plan", "ground", "typical", "roof plan"]):
+                    view_type = "plan"
+                elif any(kw in name_lower for kw in ["section", "detail", "cross"]):
+                    view_type = "section"
+                else:
+                    for direction, keywords in [
+                        ("N", ["north", "front"]),
+                        ("S", ["south", "rear", "back"]),
+                        ("E", ["east", "right"]),
+                        ("W", ["west", "left"]),
+                    ]:
+                        if any(kw in name_lower for kw in keywords):
+                            view_type = "elevation"
+                            elevation_direction = direction
+                            break
+                    if not view_type and any(kw in name_lower for kw in ["elev", "elevation"]):
+                        view_type = "elevation"
+
+                if view_type:
+                    views.append({
+                        "layout_name": layout.name,
+                        "view_type": view_type,
+                        "elevation_direction": elevation_direction,
+                    })
+        except Exception as e:
+            logger.debug(f"Error detecting paper space views: {e}")
+        return views
 
     def _count_layers(self, doc) -> int:
         """Count layers in the document."""
@@ -935,5 +1030,8 @@ class DWGParserService:
                 "spatial_clusters": 0,
                 "unique_blocks": 0,
                 "unique_layers": 0,
+                "cluster_classification": [],
+                "paper_space_views": [],
+                "entity_to_cluster": {},
             },
         }

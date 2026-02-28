@@ -120,6 +120,7 @@ class OpeningScheduleEngine:
         dwg_extraction: dict,
         scope_result=None,
         spec_text: str = "",
+        cluster_map: dict = None,
     ) -> OpeningSchedule:
         """
         Extract full opening schedule from DWG extraction.
@@ -127,6 +128,13 @@ class OpeningScheduleEngine:
         schedule = OpeningSchedule()
         opening_counters = {}  # (system_prefix, elevation, floor) → counter
         rfi_counter = [0]
+
+        # Build cluster_map from DWG metadata if not provided
+        if cluster_map is None:
+            metadata = dwg_extraction.get("metadata", {})
+            classifications = metadata.get("cluster_classification", [])
+            if classifications:
+                cluster_map = {c["cluster_index"]: c for c in classifications}
 
         # Build layer → system_type map
         layer_map = {}
@@ -167,7 +175,23 @@ class OpeningScheduleEngine:
                 height = float(bbox.get("height", 0) or 0)
 
             # Get position info
-            elevation = self._infer_elevation(block) or "E1"
+            elevation = self._infer_elevation(block, cluster_map)
+            if not elevation:
+                # Auto-generate RFI for unknown elevation
+                cluster_idx = block.get("cluster_index")
+                best_guess = f"E{cluster_idx + 1}" if cluster_idx is not None else "E1"
+                schedule.rfi_flags.append({
+                    "rfi_id": f"RFI-ELEV-{len(schedule.rfi_flags) + 1:03d}",
+                    "category": "MISSING_DATA",
+                    "severity": "HIGH",
+                    "description": (
+                        f"Elevation not identified for opening on layer '{layer}'. "
+                        f"DWG may contain multiple views but no metadata to distinguish them."
+                    ),
+                    "recommendation": "Please confirm which elevation this opening belongs to.",
+                    "affected_element": block.get("name", layer),
+                })
+                elevation = best_guess
             floor = self._normalize_floor(block.get("floor", block.get("level", ""))) or "GF"
 
             # Generate opening ID
@@ -356,14 +380,22 @@ class OpeningScheduleEngine:
                 return thickness
         return None
 
-    def _infer_elevation(self, entity: dict) -> str:
-        """Infer elevation code from entity data."""
+    def _infer_elevation(self, entity: dict, cluster_map: dict = None) -> str:
+        """Infer elevation code from entity data, with cluster-based fallback."""
+        # Priority 1: entity metadata (layer name, block attribute)
         for field_name in ["elevation", "view", "layer", "block_name"]:
             val = str(entity.get(field_name, "")).lower()
             if val:
                 for code, keywords in ELEVATION_MAP.items():
                     if any(kw in val for kw in keywords):
                         return code
+
+        # Priority 2: cluster-based assignment from DWG spatial analysis
+        if cluster_map and entity.get("cluster_index") is not None:
+            cluster = cluster_map.get(entity["cluster_index"])
+            if cluster and cluster.get("elevation_code"):
+                return cluster["elevation_code"]
+
         return ""
 
     def _normalize_floor(self, floor_str: str) -> str:
