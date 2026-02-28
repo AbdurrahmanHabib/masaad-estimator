@@ -271,8 +271,8 @@ class OpeningScheduleEngine:
                 schedule.by_floor.get(rec.floor, 0) + rec.total_gross_sqm
             )
 
-        # Generate RFIs for unusual openings
-        schedule.rfi_flags = self._generate_opening_rfis(schedule.schedule, rfi_counter)
+        # Generate RFIs for unusual openings (extend, don't overwrite — elevation RFIs already added above)
+        schedule.rfi_flags.extend(self._generate_opening_rfis(schedule.schedule, rfi_counter))
 
         logger.info(
             f"Opening schedule: {schedule.total_openings} openings, "

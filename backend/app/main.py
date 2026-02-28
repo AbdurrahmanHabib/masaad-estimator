@@ -752,7 +752,7 @@ def _extract_estimate_details(estimate) -> dict:
     al_profiles = cutting_sections.get("aluminum_profiles", {})
     profiles_count = len(al_profiles.get("profiles", []))
     bars_required = sum(p.get("bars_required", 0) for p in al_profiles.get("profiles", []))
-    avg_yield = al_profiles.get("average_yield_pct", 0)
+    avg_yield = al_profiles.get("average_yield_pct") or 0
 
     # Engineering
     eng_checks = engineering_json.get("checks", engineering_json.get("deflection_checks", []))
@@ -798,7 +798,7 @@ def _extract_estimate_details(estimate) -> dict:
         },
         "openings": {
             "items": items,
-            "total_openings": int(opening_summary.get("total_openings", len(items))),
+            "total_openings": int(opening_summary.get("total_openings") or len(items)),
             "by_type": opening_summary.get("by_type", {}),
             "by_floor": opening_summary.get("by_floor", {}),
             "by_elevation": opening_summary.get("by_elevation", {}),
@@ -870,6 +870,7 @@ async def dashboard_summary(request: Request):
             active_q = select(func.count(Estimate.id)).where(Estimate.status == "Processing")
             review_q = select(func.count(Estimate.id)).where(Estimate.status == "REVIEW_REQUIRED")
             if tenant_id:
+                proj_q = proj_q.where(Project.tenant_id == tenant_id)
                 est_q = est_q.where(Estimate.tenant_id == tenant_id)
                 active_q = active_q.where(Estimate.tenant_id == tenant_id)
                 review_q = review_q.where(Estimate.tenant_id == tenant_id)
@@ -1238,6 +1239,11 @@ async def dashboard_export_pdf(request: Request):
 
     # Materials + Financial
     y -= 0.5 * cm
+    if y < 5 * cm:
+        _draw_footer(c, page_w, 1)
+        c.showPage()
+        _draw_header(c, page_w, page_h)
+        y = page_h - 4 * cm
     c.setFont("Helvetica-Bold", 12)
     c.drawString(1.5 * cm, y, "Materials Summary")
     y -= 0.6 * cm
@@ -1253,6 +1259,11 @@ async def dashboard_export_pdf(request: Request):
         y -= 0.5 * cm
 
     y -= 0.5 * cm
+    if y < 5 * cm:
+        _draw_footer(c, page_w, 1)
+        c.showPage()
+        _draw_header(c, page_w, page_h)
+        y = page_h - 4 * cm
     c.setFont("Helvetica-Bold", 12)
     c.drawString(1.5 * cm, y, "Financial Summary")
     y -= 0.6 * cm
