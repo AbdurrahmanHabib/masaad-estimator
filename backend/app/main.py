@@ -650,8 +650,11 @@ async def seed_al_kabir_endpoint():
     Seed the AL KABIR TOWER demonstration project.
     Safe to call multiple times — idempotent, skips if already seeded.
     """
-    from app.db.seed_al_kabir import seed_al_kabir
-    return await seed_al_kabir()
+    try:
+        from app.db.seed_al_kabir import seed_al_kabir
+        return await seed_al_kabir()
+    except ImportError:
+        return {"status": "skipped", "detail": "seed_al_kabir module not available"}
 
 
 SYSTEM_CATEGORY_MAP = {
