@@ -359,43 +359,47 @@ async def recent_estimates_v1(request: Request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    async with AsyncSessionLocal() as session:
-        user_result = await session.execute(select(User).where(User.id == user_id))
-        current_user = user_result.scalar_one_or_none()
-        if not current_user:
-            from fastapi import HTTPException
-            raise HTTPException(status_code=401, detail="User not found")
+    try:
+        async with AsyncSessionLocal() as session:
+            user_result = await session.execute(select(User).where(User.id == user_id))
+            current_user = user_result.scalar_one_or_none()
+            if not current_user:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=401, detail="User not found")
 
-        tenant_id = current_user.tenant_id
-        if not tenant_id:
-            return []
+            tenant_id = current_user.tenant_id
+            if not tenant_id:
+                return []
 
-        query = (
-            select(Estimate, Project)
-            .outerjoin(Project, Estimate.project_id == Project.id)
-            .where(Estimate.tenant_id == tenant_id)
-            .order_by(desc(Estimate.created_at))
-            .limit(10)
-        )
-        result = await session.execute(query)
-        rows = result.all()
+            query = (
+                select(Estimate, Project)
+                .outerjoin(Project, Estimate.project_id == Project.id)
+                .where(Estimate.tenant_id == tenant_id)
+                .order_by(desc(Estimate.created_at))
+                .limit(10)
+            )
+            result = await session.execute(query)
+            rows = result.all()
 
-    return [
-        {
-            "estimate_id": str(e.id),
-            "project_id": str(e.project_id),
-            "project_name": (p.name if p else "") or "",
-            "client_name": (p.client_name if p else "") or "",
-            "location": (p.location_zone if p else "") or "",
-            "status": e.status,
-            "progress_pct": e.progress_pct,
-            "current_step": e.current_step,
-            "created_at": e.created_at.isoformat() if e.created_at else None,
-            "updated_at": e.updated_at.isoformat() if e.updated_at else None,
-            "bom_summary": (e.bom_output_json or {}).get("summary", {}),
-        }
-        for e, p in rows
-    ]
+        return [
+            {
+                "estimate_id": str(e.id),
+                "project_id": str(e.project_id),
+                "project_name": (p.name if p else "") or "",
+                "client_name": (p.client_name if p else "") or "",
+                "location": (p.location_zone if p else "") or "",
+                "status": e.status,
+                "progress_pct": e.progress_pct,
+                "current_step": e.current_step,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+                "bom_summary": (e.bom_output_json or {}).get("summary", {}),
+            }
+            for e, p in rows
+        ]
+    except Exception as exc:
+        logger.error(f"estimates/recent error: {exc}", exc_info=True)
+        return JSONResponse(status_code=500, content={"detail": str(exc)[:500]})
 
 
 @app.get("/api/v1/estimates/{estimate_id}")
