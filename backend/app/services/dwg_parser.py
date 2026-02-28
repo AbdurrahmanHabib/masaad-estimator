@@ -50,6 +50,30 @@ MAX_PANEL_DIM_MM = 15000.0
 # Three systems specified by client for AL KABIR TOWER:
 
 GLAZETECH_CATALOG = {
+    "top_hung": {
+        "name": "Glazetech Top Hung Window",
+        "series": "GT-TH",
+        "system_type": "Window - Top Hung",
+        "thermal_break": True,
+        "frame_depth_mm": 60,
+        "sash_depth_mm": 50,
+        "max_sash_weight_kg": 80,
+        "max_sash_width_mm": 1600,
+        "max_sash_height_mm": 2400,
+        "min_width_mm": 400,
+        "glazing_range_mm": (20, 36),
+        "uf_value": 3.0,
+        "air_permeability": "Class 4",
+        "water_tightness": "Class 9A",
+        "wind_resistance": "Class C4",
+        "aluminum_kg_per_lm": 4.5,
+        "profiles_per_unit": 6,
+        "gasket_multiplier": 1.8,
+        "hardware_type": "Top hung friction stay + espagnolette",
+        "finish": "Powder Coated RAL",
+        "supplier": "Elite Extrusion L.L.C",
+        "application": "Bedroom, kitchen, bathroom windows (non-sliding)",
+    },
     "lift_and_slide_tb": {
         "name": "Glazetech Lift and Slide Thermal Break",
         "series": "GT-LSTB",
@@ -137,22 +161,50 @@ FACADE_DIRECTION_MAP = {
 }
 
 
-def classify_glazetech_system(width_mm: float, height_mm: float, room_context: str = "", opening_type: str = "window") -> dict:
+def classify_glazetech_system(width_mm: float, height_mm: float, room_context: str = "", opening_type: str = "window", has_railing: bool = False) -> dict:
     """
     Classify a window opening to the correct Glazetech profile system.
 
-    Rules (from client WhatsApp + catalog analysis for AL KABIR TOWER):
-    - Width >= 6000mm → Lift & Slide TB (extra-large balcony/patio doors, 7000mm)
-    - Balcony context → Lift & Slide TB regardless of size
-    - Width 3000-6000mm → Slim Sliding (regular bedroom/living windows: 5300, 3650, 3400mm)
-    - Width < 3000mm → Eco 500 Sliding TB (small windows, economic thermal break)
+    Rules verified from building illustrations + DXF analysis:
+    - Width < 800mm  → Top Hung Window (small bathroom/kitchen ventilation windows)
+    - Width 800-1800mm → Fixed Window (non-operable glass panels on facade)
+    - Width >= 1800mm → Sliding Window (horizontal sliding)
+      - Width >= 6000mm → Lift & Slide TB (extra-large patio doors)
+      - Width 3000-6000mm → Slim Sliding
+      - Width 1800-3000mm → Eco 500 Sliding TB
 
     Returns catalog entry dict with system_type, series, etc.
     """
-    room_lower = room_context.lower() if room_context else ""
-    is_balcony = any(kw in room_lower for kw in ["balcon", "patio", "terrace"])
+    # Small openings are top hung (bathroom/kitchen ventilation)
+    if width_mm < 800:
+        return GLAZETECH_CATALOG["top_hung"]
 
-    if is_balcony or width_mm >= 6000:
+    # Mid-width: fixed glass panels (non-operable facade panels)
+    if width_mm < 1800:
+        return {
+            "name": "Fixed Window",
+            "series": "FIXED",
+            "system_type": "Window - Fixed",
+            "thermal_break": False,
+            "frame_depth_mm": 50,
+            "sash_depth_mm": 0,
+            "max_sash_weight_kg": 0,
+            "max_sash_width_mm": 0,
+            "max_sash_height_mm": 0,
+            "min_width_mm": 0,
+            "glazing_range_mm": (5, 24),
+            "uf_value": 5.5,
+            "aluminum_kg_per_lm": 3.0,
+            "profiles_per_unit": 4,
+            "gasket_multiplier": 1.0,
+            "hardware_type": "None (fixed)",
+            "finish": "Powder Coated RAL",
+            "supplier": "Elite Extrusion L.L.C",
+            "application": "Non-operable facade glass panels",
+        }
+
+    # Width >= 1800mm: sliding windows — select system by width
+    if width_mm >= 6000:
         return GLAZETECH_CATALOG["lift_and_slide_tb"]
     elif width_mm >= 3000:
         return GLAZETECH_CATALOG["slim_sliding"]
@@ -262,6 +314,8 @@ class OpeningInfo:
     entity_idx: int = -1  # index into entity_bounds_for_clustering for spatial dedup
     floor: str = ""
     elevation: str = ""
+    dxf_panel_hint: int = 0  # panel count from DXF block type (0 = use width rules)
+    has_railing: bool = False  # True if KORKULUK railing nearby (balcony context)
 
 
 @dataclass
@@ -1033,18 +1087,36 @@ class DWGParserService:
         enriched_openings = []
         for o in deduped_openings:
             if o.type == "door":
-                # Doors get Door - Sliding system (same Lift & Slide hardware)
-                system_type = "Door - Sliding"
+                # Classify door type from block name
+                bname = o.block_name.lower() if o.block_name else ""
+                if 'fm-door4' in bname or 'fm-door3' in bname or o.width_mm >= 1800:
+                    system_type = "Door - Double Swing"
+                elif o.width_mm >= 2000:
+                    system_type = "Door - Sliding"
+                else:
+                    system_type = "Door - Single Swing"
                 system_series = "GT-LSTB"
                 system_name = "Glazetech Lift and Slide Thermal Break (Door)"
                 thermal_break = True
                 glazetech_profile = GLAZETECH_CATALOG["lift_and_slide_tb"]
             else:
-                glazetech_profile = classify_glazetech_system(o.width_mm, o.height_mm, opening_type=o.type)
+                o_has_railing = getattr(o, 'has_railing', False)
+                glazetech_profile = classify_glazetech_system(
+                    o.width_mm, o.height_mm, opening_type=o.type, has_railing=o_has_railing
+                )
                 system_type = glazetech_profile["system_type"]
                 system_series = glazetech_profile["series"]
                 system_name = glazetech_profile["name"]
                 thermal_break = glazetech_profile["thermal_break"]
+
+            # Look up DXF bounding box for shop drawing rendering
+            o_entity_idx = getattr(o, 'entity_idx', -1)
+            dxf_bbox = None
+            if o_entity_idx >= 0:
+                for idx, bounds in entity_bounds_for_clustering:
+                    if idx == o_entity_idx:
+                        dxf_bbox = bounds.to_dict()
+                        break
 
             enriched_openings.append({
                 "type": o.type,
@@ -1056,11 +1128,14 @@ class DWGParserService:
                 "layer": o.layer,
                 "floor": getattr(o, 'floor', ''),
                 "elevation": getattr(o, 'elevation', ''),
+                "entity_idx": o_entity_idx,
+                "dxf_bbox": dxf_bbox,
                 "system_type": system_type,
                 "system_series": system_series,
                 "system_name": system_name,
                 "thermal_break": thermal_break,
                 "glazetech_profile": glazetech_profile,
+                "dxf_panel_hint": getattr(o, 'dxf_panel_hint', 0),
             })
 
         # Include building data from Turkish extraction
@@ -1204,7 +1279,15 @@ class DWGParserService:
           - Pencere: window polylines
           - Kapı-Pencere, KAPI_PENCERE: door-window layers
           - kapi: door block insertions
-          - iç ölçü: floor plan labels ("1,2,3,4,5,6,7,8,9TH FLOOR PLAN SCALE:1/50 AREA:841.94 m²")
+          - iç ölçü: floor plan labels
+
+        IMPORTANT: Turkish DXFs often have TWO sets of penc-yazi annotations:
+          1. Modelspace: structural bay sizes (e.g., "530/220" = 5300mm multi-panel opening)
+          2. Inside floor plan blocks (e.g., "RST FLOOR"): individual window sizes
+             (e.g., "150/220" = 1500mm single window panel)
+
+        We prefer individual window sizes from block definitions when available,
+        as these represent the actual fabrication units.
 
         Returns list of OpeningInfo with proper counts per floor.
         """
@@ -1218,22 +1301,195 @@ class DWGParserService:
             return openings
 
         # ── Step 1: Extract window dimension texts from annotation layers ────
-        dim_texts = []  # (text, x, y, layer)
+        # Turkish DXFs have two annotation sources:
+        #   a) Inside block definitions (e.g., "RST FLOOR", "LAST"): individual window sizes
+        #   b) In modelspace: structural bay sizes (multi-panel opening widths)
+        # We prefer (a) when available, as those are the real fabrication units.
+
+        # 1a. Count how many times each block is inserted in modelspace
+        block_insert_counts = {}  # block_name -> insert count
         for e in entities:
             try:
-                if e.dxftype() != 'TEXT':
-                    continue
-                layer = e.dxf.layer if hasattr(e.dxf, 'layer') else ''
-                if not _TURKISH_DIM_LAYERS.search(layer):
-                    continue
-                text = e.dxf.text.strip()
-                x = e.dxf.insert.x if hasattr(e.dxf, 'insert') else 0
-                y = e.dxf.insert.y if hasattr(e.dxf, 'insert') else 0
-                dim_texts.append((text, x, y, layer))
+                if e.dxftype() == 'INSERT':
+                    bname = e.dxf.name
+                    block_insert_counts[bname] = block_insert_counts.get(bname, 0) + 1
             except Exception:
                 continue
 
-        if not dim_texts:
+        # 1b. Scan block definitions for penc-yazi annotations
+        # Only consider blocks that are actually inserted in modelspace
+        block_openings_data = {}  # block_name -> {(w_mm, h_mm): count_per_block}
+        try:
+            for block in doc.blocks:
+                block_name = block.name
+                if block_name.startswith('*') or block_name.startswith('_'):
+                    continue
+                # Only process blocks that are inserted in modelspace
+                if block_name not in block_insert_counts:
+                    continue
+                dims_in_block = []
+                for e in block:
+                    try:
+                        if e.dxftype() != 'TEXT':
+                            continue
+                        layer = e.dxf.layer if hasattr(e.dxf, 'layer') else ''
+                        if not _TURKISH_DIM_LAYERS.search(layer):
+                            continue
+                        text = e.dxf.text.strip()
+                        match = _DIM_PATTERN_SLASH_CM.match(text)
+                        if match:
+                            w_cm = float(match.group(1))
+                            h_cm = float(match.group(2))
+                            w_mm = w_cm * 10
+                            h_mm = h_cm * 10
+                            if 300 <= w_mm <= 15000 and 300 <= h_mm <= 15000:
+                                dims_in_block.append((w_mm, h_mm))
+                    except Exception:
+                        continue
+                if dims_in_block:
+                    from collections import Counter as _Ctr
+                    block_openings_data[block_name] = dict(_Ctr(dims_in_block))
+        except Exception as e:
+            logger.debug(f"Turkish extraction: error scanning block definitions: {e}")
+
+        # 1c. Map annotations → fm-win* block type to determine panel config
+        # Panel counts verified from actual DXF block geometry (track mark analysis):
+        #   fm-win1 (100cm base): 2 edge clusters, 1 panel region => 1 fixed panel
+        #   fm-win2 (120cm base): 3 clusters, 2 panel regions => 2-panel sliding
+        #   fm-win3 (180cm base): 4 clusters, 3 panel regions => 3-panel sliding
+        #   fm-win4 (240cm base): 5 clusters, 4 panel regions => 4-panel sliding
+        #   fm-win5 (360cm base): 7 clusters, 6 panel regions => 6-panel sliding
+        _WIN_BLOCK_BASE_W_CM = {
+            'fm-win1': 100, 'fm-win2': 120, 'fm-win3': 180, 'fm-win4': 240, 'fm-win5': 360,
+        }
+        _WIN_BLOCK_PANELS = {
+            'fm-win1': 1, 'fm-win2': 2, 'fm-win3': 3, 'fm-win4': 4, 'fm-win5': 6,
+        }
+        # dim_panel_hints: (w_mm, h_mm) → list of (panel_count, qty)
+        dim_panel_hints = {}
+
+        if block_openings_data:
+            for bname_outer in block_openings_data:
+                try:
+                    block_def = doc.blocks.get(bname_outer)
+                    if not block_def:
+                        continue
+                except Exception:
+                    continue
+
+                num_inserts = block_insert_counts.get(bname_outer, 0)
+                if num_inserts == 0:
+                    continue
+
+                # Collect annotation positions + fm-win* inserts with actual widths
+                annot_list = []  # (w_mm, h_mm, x, y)
+                win_inserts = []  # (fm_win_name, actual_w_mm, x, y)
+
+                for e in block_def:
+                    try:
+                        if e.dxftype() == 'TEXT':
+                            layer = e.dxf.layer if hasattr(e.dxf, 'layer') else ''
+                            if _TURKISH_DIM_LAYERS.search(layer):
+                                text = e.dxf.text.strip()
+                                match = _DIM_PATTERN_SLASH_CM.match(text)
+                                if match:
+                                    w_mm = float(match.group(1)) * 10
+                                    h_mm = float(match.group(2)) * 10
+                                    x = e.dxf.insert.x if hasattr(e.dxf, 'insert') else 0
+                                    y = e.dxf.insert.y if hasattr(e.dxf, 'insert') else 0
+                                    annot_list.append((w_mm, h_mm, x, y))
+                        elif e.dxftype() == 'INSERT':
+                            inner_name = e.dxf.name.lower()
+                            if inner_name in _WIN_BLOCK_BASE_W_CM:
+                                xs = abs(getattr(e.dxf, 'xscale', 1.0) or 1.0)
+                                actual_w_mm = _WIN_BLOCK_BASE_W_CM[inner_name] * xs * 10
+                                x = e.dxf.insert.x if hasattr(e.dxf, 'insert') else 0
+                                y = e.dxf.insert.y if hasattr(e.dxf, 'insert') else 0
+                                win_inserts.append((inner_name, actual_w_mm, x, y))
+                    except Exception:
+                        continue
+
+                # Build a map of unique fm-win block types with their actual widths
+                # For each unique annotation dimension, find best matching block type
+                # based on width similarity (not proximity — blocks may not be 1:1 with annotations)
+                unique_win_widths = {}  # fm_win_name -> set of actual widths
+                for win_name, win_w_mm, wx, wy in win_inserts:
+                    if win_name not in unique_win_widths:
+                        unique_win_widths[win_name] = set()
+                    unique_win_widths[win_name].add(round(win_w_mm))
+
+                # Collect unique annotation dimensions in this block
+                from collections import Counter as _AnnCtr
+                annot_dims = _AnnCtr((w_mm, h_mm) for w_mm, h_mm, _, _ in annot_list)
+
+                for (w_mm, h_mm), count in annot_dims.items():
+                    # Find best fm-win type by width similarity
+                    best_block = None
+                    best_w_diff = float('inf')
+                    for win_name, widths in unique_win_widths.items():
+                        for ww in widths:
+                            w_diff = abs(w_mm - ww)
+                            if w_diff < best_w_diff:
+                                best_w_diff = w_diff
+                                best_block = win_name
+
+                    # Only assign if width match is reasonable (< 50% of annotation width)
+                    if best_block and best_w_diff < w_mm * 0.5:
+                        panel_count = _WIN_BLOCK_PANELS[best_block]
+                    else:
+                        panel_count = 0
+
+                    key = (w_mm, h_mm)
+                    if key not in dim_panel_hints:
+                        dim_panel_hints[key] = []
+                    # Each annotation in this block contributes count × inserts
+                    dim_panel_hints[key].append((panel_count, count * num_inserts))
+
+            logger.info(f"Turkish DXF: panel hints from block types: {dict((k, [(p,q) for p,q in v]) for k,v in dim_panel_hints.items())}")
+
+        # 1d. If we found block-level annotations, use them directly
+        # Each block's annotation count × insert count = total openings from that block
+        use_block_level = bool(block_openings_data)
+
+        if use_block_level:
+            # Aggregate: for each (w, h), sum across all blocks: per_block_count × insert_count
+            from collections import Counter
+            aggregated_dims = Counter()
+            for bname, dim_counts in block_openings_data.items():
+                num_inserts = block_insert_counts.get(bname, 0)
+                for (w_mm, h_mm), per_block_count in dim_counts.items():
+                    aggregated_dims[(w_mm, h_mm)] += per_block_count * num_inserts
+
+            logger.info(
+                f"Turkish DXF: using block-level annotations — "
+                f"{len(block_openings_data)} blocks with window dims: "
+                f"{', '.join(f'{k}(×{block_insert_counts.get(k, 0)})' for k in block_openings_data)}"
+            )
+
+            # Build dim_texts as dummy entries so the rest of the pipeline
+            # (floor plan extraction, facade labels, etc.) still works.
+            # The actual opening creation is short-circuited below.
+            dim_texts = [(f"{int(w/10)}/{int(h/10)}", 0, 0, "penc-yazi")
+                         for (w, h) in aggregated_dims]
+
+        else:
+            # 1d. Fall back to modelspace annotations (structural bay sizes)
+            dim_texts = []
+            for e in entities:
+                try:
+                    if e.dxftype() != 'TEXT':
+                        continue
+                    layer = e.dxf.layer if hasattr(e.dxf, 'layer') else ''
+                    if not _TURKISH_DIM_LAYERS.search(layer):
+                        continue
+                    text = e.dxf.text.strip()
+                    x = e.dxf.insert.x if hasattr(e.dxf, 'insert') else 0
+                    y = e.dxf.insert.y if hasattr(e.dxf, 'insert') else 0
+                    dim_texts.append((text, x, y, layer))
+                except Exception:
+                    continue
+
+        if not dim_texts and not use_block_level:
             return openings
 
         logger.info(f"Turkish DXF: found {len(dim_texts)} dimension texts on annotation layers")
@@ -1261,7 +1517,7 @@ class DWGParserService:
                             parsed_dims.append((w, h, x, y, layer))
                         break
 
-        if not parsed_dims:
+        if not parsed_dims and not use_block_level:
             return openings
 
         # ── Step 3: Extract floor plan labels to determine floor structure ───
@@ -1297,50 +1553,48 @@ class DWGParserService:
 
         num_typical = len(typical_floors) if typical_floors else 1
 
-        # ── Step 5: Cluster dimension texts to find per-floor window types ───
-        # Group by unique (width, height) to get window types
+        # ── Step 5: Determine per-floor window types and quantities ────────
         from collections import Counter
-        dim_counter = Counter((w, h) for w, h, _, _, _ in parsed_dims)
 
-        # The dimension texts are placed per floor plan drawing. With 94 clusters,
-        # there are multiple copies. Count how many UNIQUE spatial positions each
-        # dim type appears at (approximate: group by similar X position).
-        # For typical floor plans, each unique dim = one window type per floor.
-        # Total quantity = count_per_floor × num_typical_floors
+        if use_block_level:
+            # Block-level path: aggregated_dims already has correct totals
+            # (per_block_count × insert_count for each block)
+            dim_counter = aggregated_dims
+            num_plan_copies = 1  # Not used in block-level path
+            logger.info(
+                f"Turkish DXF: {len(dim_counter)} unique window types from "
+                f"block-level annotations (totals already computed from insert counts)"
+            )
+        else:
+            # Modelspace path: cluster dimension texts to find per-floor window types
+            dim_counter = Counter((w, h) for w, h, _, _, _ in parsed_dims)
 
-        # Determine how many floor plan COPIES the dims are spread across.
-        # In architectural DXFs, floor plans are arranged in a grid: multiple
-        # X-columns (different floor levels) and Y-rows (duplicate copies).
-        # Each (column, row) is one plan copy showing the same openings.
+            def _cluster_1d(values, gap_threshold):
+                """Cluster sorted 1D values by gap."""
+                if not values:
+                    return []
+                clusters = [[values[0]]]
+                for v in values[1:]:
+                    if v - clusters[-1][-1] > gap_threshold:
+                        clusters.append([v])
+                    else:
+                        clusters[-1].append(v)
+                return clusters
 
-        def _cluster_1d(values, gap_threshold):
-            """Cluster sorted 1D values by gap."""
-            if not values:
-                return []
-            clusters = [[values[0]]]
-            for v in values[1:]:
-                if v - clusters[-1][-1] > gap_threshold:
-                    clusters.append([v])
-                else:
-                    clusters[-1].append(v)
-            return clusters
+            raw_x = sorted(set(x for _, _, x, _, _ in parsed_dims))
+            raw_y = sorted(set(y for _, _, _, y, _ in parsed_dims))
 
-        raw_x = sorted(set(x for _, _, x, _, _ in parsed_dims))
-        raw_y = sorted(set(y for _, _, _, y, _ in parsed_dims))
+            x_groups = _cluster_1d(raw_x, 2500)
+            y_groups = _cluster_1d(raw_y, 3000)
 
-        # Floor plans are ~3000-5000 units apart in X and Y
-        x_groups = _cluster_1d(raw_x, 2500)
-        y_groups = _cluster_1d(raw_y, 3000)
+            num_plan_copies = len(x_groups) * len(y_groups)
+            if num_plan_copies < 1:
+                num_plan_copies = 1
 
-        # Each (x_group, y_group) represents one floor plan copy
-        num_plan_copies = len(x_groups) * len(y_groups)
-        if num_plan_copies < 1:
-            num_plan_copies = 1
-
-        logger.info(
-            f"Turkish DXF: {len(dim_counter)} unique window types, "
-            f"{num_typical} typical floors, {num_plan_copies} plan copies"
-        )
+            logger.info(
+                f"Turkish DXF: {len(dim_counter)} unique window types, "
+                f"{num_typical} typical floors, {num_plan_copies} plan copies"
+            )
 
         # ── Step 5b: Extract facade labels and building metadata ─────────────
         facade_labels = []  # (facade_name, x, y)
@@ -1409,11 +1663,14 @@ class DWGParserService:
 
         # ── Step 6: Create OpeningInfo records with Glazetech classification ──
         for (w_mm, h_mm), total_count in dim_counter.most_common():
-            # Count per floor = total annotations / number of plan copies
-            per_floor = max(1, total_count // max(num_plan_copies, 1))
-
-            # Total across all typical floors
-            total_qty = per_floor * num_typical
+            if use_block_level:
+                # Block-level: total_count already includes insert multipliers
+                # e.g., RST FLOOR has 4× "150/220" and is inserted 9 times → 36 total
+                total_qty = total_count
+            else:
+                # Modelspace: divide by plan copies to get per-floor, then multiply
+                per_floor = max(1, total_count // max(num_plan_copies, 1))
+                total_qty = per_floor * num_typical
 
             # Classify to correct Glazetech system based on size
             glazetech = classify_glazetech_system(w_mm, h_mm)
@@ -1423,6 +1680,19 @@ class DWGParserService:
 
             area_sqm = round(w_mm * h_mm / 1_000_000, 4)
 
+            # Determine panel hint from DXF block type mapping
+            panel_hint = 0
+            hints = dim_panel_hints.get((w_mm, h_mm), [])
+            if hints:
+                # Use the most common panel count (weighted by qty)
+                from collections import Counter as _PHCtr
+                hint_votes = _PHCtr()
+                for pc, qty in hints:
+                    if pc > 0:
+                        hint_votes[pc] += qty
+                if hint_votes:
+                    panel_hint = hint_votes.most_common(1)[0][0]
+
             opening = OpeningInfo(
                 type="window",
                 width_mm=round(w_mm, 1),
@@ -1431,6 +1701,7 @@ class DWGParserService:
                 block_name=block_name,
                 count=total_qty,
                 layer="Pencere",
+                dxf_panel_hint=panel_hint,
             )
             # Attach floor and system info as attributes
             opening.floor = ""  # Will be distributed across floors by opening_schedule_engine
@@ -1438,54 +1709,147 @@ class DWGParserService:
 
             openings.append(opening)
 
-        # ── Step 7: Add door openings from kapi layer ────────────────────────
-        door_inserts = []
-        for e in entities:
-            try:
-                if e.dxftype() == 'INSERT' and hasattr(e.dxf, 'layer'):
-                    layer_lower = e.dxf.layer.lower()
-                    if 'kap' in layer_lower or 'door' in layer_lower:
-                        block_name = e.dxf.name
-                        x_scale = abs(getattr(e.dxf, 'xscale', 1.0) or 1.0)
-                        y_scale = abs(getattr(e.dxf, 'yscale', 1.0) or 1.0)
-                        door_inserts.append((block_name, x_scale, y_scale, e.dxf.layer))
-            except Exception:
-                continue
+        # ── Step 7: Add door openings from fm-door* inserts ─────────────────
+        # Known Turkish door block base widths (cm). Actual width = base × xscale.
+        _DOOR_BASE_W_CM = {'fm-door1': 100, 'fm-door2': 150, 'fm-door3': 200,
+                           'fm-door4': 200, 'fm-door5': 250}
+        _DOOR_H_CM = 220  # standard door height in Turkish DXFs
 
-        if door_inserts:
-            door_counter = Counter(door_inserts)
-            for (bname, xs, ys, layer), total_count in door_counter.items():
-                # Try to get door dimensions from block definition
-                w_mm, h_mm = 1000.0, 2200.0  # Default door size
+        if use_block_level:
+            # Block-level path: extract door INSERTs from inside block definitions
+            # (same approach as window annotations in Step 1b)
+            from collections import Counter as _DoorCtr
+            aggregated_doors = _DoorCtr()  # (block_name, actual_w_cm) -> total_count
+
+            for bname_outer, dim_counts in block_openings_data.items():
+                pass  # block_openings_data only has window dims, not doors
+
+            for bname_outer in block_insert_counts:
+                if bname_outer.startswith('*') or bname_outer.startswith('_'):
+                    continue
                 try:
-                    block_def = doc.blocks.get(bname)
-                    if block_def:
-                        bb = BoundingBox()
-                        for bent in block_def:
-                            b = _safe_bounds(bent)
-                            if b:
-                                bb.extend([Vec3(b.min_x, b.min_y, 0), Vec3(b.max_x, b.max_y, 0)])
-                        if not bb.is_empty:
-                            w_mm = abs(bb.size.x * xs)
-                            h_mm = abs(bb.size.y * ys)
+                    block_def = doc.blocks.get(bname_outer)
+                    if not block_def:
+                        continue
                 except Exception:
-                    pass
+                    continue
 
-                per_floor = max(1, total_count // max(num_plan_copies, 1))
-                total_qty = per_floor * num_typical
+                num_inserts = block_insert_counts.get(bname_outer, 0)
+                if num_inserts == 0:
+                    continue
+
+                door_counts_in_block = _DoorCtr()
+                for e in block_def:
+                    try:
+                        if e.dxftype() != 'INSERT':
+                            continue
+                        inner_bname = e.dxf.name
+                        if inner_bname not in _DOOR_BASE_W_CM:
+                            continue
+                        xs = round(abs(getattr(e.dxf, 'xscale', 1.0) or 1.0), 2)
+                        actual_w_cm = round(_DOOR_BASE_W_CM[inner_bname] * xs)
+                        door_counts_in_block[(inner_bname, actual_w_cm)] += 1
+                    except Exception:
+                        continue
+
+                for (dblock, dw_cm), per_block in door_counts_in_block.items():
+                    aggregated_doors[(dblock, dw_cm)] += per_block * num_inserts
+
+            for (dblock, dw_cm), total_qty in aggregated_doors.items():
+                w_mm = dw_cm * 10.0
+                h_mm = _DOOR_H_CM * 10.0
+
+                # Classify door type from block name and width
+                if dblock == 'fm-door4' or dblock == 'fm-door3':
+                    door_sys = "Door - Double Swing"
+                else:
+                    door_sys = "Door - Single Swing"
 
                 opening = OpeningInfo(
                     type="door",
-                    width_mm=round(max(w_mm, h_mm), 1) if w_mm < h_mm else round(w_mm, 1),
-                    height_mm=round(min(w_mm, h_mm), 1) if w_mm < h_mm else round(h_mm, 1),
+                    width_mm=w_mm,
+                    height_mm=h_mm,
                     area_sqm=round(w_mm * h_mm / 1_000_000, 4),
-                    block_name=bname,
+                    block_name=dblock,
                     count=total_qty,
-                    layer=layer,
+                    layer="kapi",
                 )
                 opening.floor = ""
                 opening.elevation = ""
                 openings.append(opening)
+
+            if aggregated_doors:
+                logger.info(
+                    f"Turkish DXF: {len(aggregated_doors)} door types from "
+                    f"block-level extraction, {sum(aggregated_doors.values())} total"
+                )
+
+        else:
+            # Modelspace path: search modelspace for door INSERTs on kapi layer
+            door_inserts = []
+            door_positions = []
+            for e in entities:
+                try:
+                    if e.dxftype() == 'INSERT' and hasattr(e.dxf, 'layer'):
+                        layer_lower = e.dxf.layer.lower()
+                        if 'kap' in layer_lower or 'door' in layer_lower:
+                            block_name = e.dxf.name
+                            x_scale = abs(getattr(e.dxf, 'xscale', 1.0) or 1.0)
+                            y_scale = abs(getattr(e.dxf, 'yscale', 1.0) or 1.0)
+                            door_inserts.append((block_name, x_scale, y_scale, e.dxf.layer))
+                            ins = e.dxf.insert
+                            door_positions.append((ins.x, ins.y))
+                except Exception:
+                    continue
+
+            if door_inserts:
+                door_counter = Counter(door_inserts)
+                for (bname, xs, ys, layer), total_count in door_counter.items():
+                    # Use known door block dimensions when available
+                    if bname in _DOOR_BASE_W_CM:
+                        w_mm = round(_DOOR_BASE_W_CM[bname] * xs) * 10.0
+                        h_mm = _DOOR_H_CM * 10.0
+                    else:
+                        # Fallback: try bounding box
+                        w_mm, h_mm = 1000.0, 2200.0
+                        try:
+                            block_def = doc.blocks.get(bname)
+                            if block_def:
+                                bb = BoundingBox()
+                                for bent in block_def:
+                                    b = _safe_bounds(bent)
+                                    if b:
+                                        bb.extend([Vec3(b.min_x, b.min_y, 0), Vec3(b.max_x, b.max_y, 0)])
+                                if not bb.is_empty:
+                                    w_mm = abs(bb.size.x * xs * 10)  # cm to mm
+                                    h_mm = abs(bb.size.y * ys * 10)
+                        except Exception:
+                            pass
+
+                    # Ensure width < height for doors
+                    if w_mm > h_mm:
+                        w_mm, h_mm = h_mm, w_mm
+
+                    # Classify door type
+                    if bname in ('fm-door4', 'fm-door3') or w_mm >= 1800:
+                        door_sys = "Door - Double Swing"
+                    else:
+                        door_sys = "Door - Single Swing"
+
+                    total_qty = total_count  # For modelspace, may need plan copy division
+
+                    opening = OpeningInfo(
+                        type="door",
+                        width_mm=round(w_mm, 1),
+                        height_mm=round(h_mm, 1),
+                        area_sqm=round(w_mm * h_mm / 1_000_000, 4),
+                        block_name=bname,
+                        count=total_qty,
+                        layer=layer,
+                    )
+                    opening.floor = ""
+                    opening.elevation = ""
+                    openings.append(opening)
 
         # ── Step 8: Add building metadata for downstream engines ─────────────
         if openings:
