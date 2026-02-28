@@ -25,6 +25,7 @@ import {
   Wrench,
   Ruler,
   Grid3X3,
+  Scissors,
 } from 'lucide-react';
 import { apiGet, apiPost, apiFetch } from '../../lib/api';
 
@@ -194,7 +195,7 @@ function fmtNum(value: number | undefined | null, decimals = 2): string {
   return value.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-type TabKey = 'summary' | 'bom' | 'scope' | 'financial' | 'engineering' | 'compliance' | 'drawings';
+type TabKey = 'summary' | 'bom' | 'scope' | 'financial' | 'engineering' | 'compliance' | 'cutting' | 'drawings';
 
 // Helper to normalize opening schedule data into an array
 function normalizeOpenings(raw: Record<string, unknown> | OpeningItem[] | undefined | null): OpeningItem[] {
@@ -525,10 +526,91 @@ function ScopeTab({ scope, openings }: { scope: Record<string, unknown>; opening
         </div>
       )}
 
+      {/* Floor & Elevation Breakdown */}
+      {openingsList.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* By System Type */}
+          {(() => {
+            const byType: Record<string, { count: number; area: number }> = {};
+            openingsList.forEach((op) => {
+              const t = String(op.system_type || op.type || op.opening_type || 'Unknown');
+              if (!byType[t]) byType[t] = { count: 0, area: 0 };
+              const qty = Number(op.quantity || op.qty || 1);
+              const w = Number(op.width_mm || op.width || 0);
+              const h = Number(op.height_mm || op.height || 0);
+              byType[t].count += qty;
+              byType[t].area += (w / 1000) * (h / 1000) * qty;
+            });
+            const sorted = Object.entries(byType).sort((a, b) => b[1].count - a[1].count);
+            return (
+              <div className="bg-white rounded-md border border-slate-200 p-4">
+                <h4 className="text-xs font-semibold text-[#002147] mb-2">By System Type</h4>
+                <div className="space-y-1.5">
+                  {sorted.map(([type, { count, area }]) => (
+                    <div key={type} className="flex justify-between text-xs">
+                      <span className="text-slate-600 truncate mr-2">{type}</span>
+                      <span className="font-mono text-slate-800 whitespace-nowrap">{count} pcs / {area.toFixed(1)} sqm</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* By Floor */}
+          {(() => {
+            const byFloor: Record<string, number> = {};
+            openingsList.forEach((op) => {
+              const f = String(op.floor || 'Unknown');
+              const qty = Number(op.quantity || op.qty || 1);
+              byFloor[f] = (byFloor[f] || 0) + qty;
+            });
+            return (
+              <div className="bg-white rounded-md border border-slate-200 p-4">
+                <h4 className="text-xs font-semibold text-[#002147] mb-2">By Floor</h4>
+                <div className="space-y-1.5">
+                  {Object.entries(byFloor).map(([floor, count]) => (
+                    <div key={floor} className="flex justify-between text-xs">
+                      <span className="text-slate-600">{floor}</span>
+                      <span className="font-mono text-slate-800">{count} items</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* By Elevation */}
+          {(() => {
+            const byElev: Record<string, number> = {};
+            openingsList.forEach((op) => {
+              const e = String((op as Record<string, unknown>).elevation || 'Unknown');
+              const qty = Number(op.quantity || op.qty || 1);
+              byElev[e] = (byElev[e] || 0) + qty;
+            });
+            return (
+              <div className="bg-white rounded-md border border-slate-200 p-4">
+                <h4 className="text-xs font-semibold text-[#002147] mb-2">By Elevation</h4>
+                <div className="space-y-1.5">
+                  {Object.entries(byElev).map(([elev, count]) => (
+                    <div key={elev} className="flex justify-between text-xs">
+                      <span className="text-slate-600">{elev}</span>
+                      <span className="font-mono text-slate-800">{count} items</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {/* Opening Schedule Table */}
       {openingsList.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold text-[#002147] mb-3">Opening Schedule</h3>
+          <h3 className="text-sm font-semibold text-[#002147] mb-3">
+            Opening Schedule ({openingsList.length} items)
+          </h3>
           <OpeningScheduleTable openings={openingsList} />
         </div>
       )}
@@ -1040,6 +1122,136 @@ function DrawingsTab({ estimateId }: { estimateId: string }) {
   );
 }
 
+// Cutting List Tab
+function CuttingListTab({ cuttingList }: { cuttingList: Record<string, unknown> }) {
+  const sections = (cuttingList?.sections || cuttingList) as Record<string, unknown>;
+  const alProfiles = (sections?.aluminum_profiles || {}) as Record<string, unknown>;
+  const profiles = (alProfiles?.profiles || []) as Array<Record<string, unknown>>;
+  const avgYield = Number(alProfiles?.average_yield_pct || 0);
+  const totalBars = profiles.reduce((sum, p) => sum + Number(p.bars_required || 0), 0);
+  const totalLength = profiles.reduce((sum, p) => sum + Number(p.total_cut_length_mm || 0), 0);
+
+  const glassSchedule = (sections?.glass_cutting || sections?.glass_schedule || {}) as Record<string, unknown>;
+  const glassItems = (glassSchedule?.items || glassSchedule?.panels || []) as Array<Record<string, unknown>>;
+
+  const hasData = profiles.length > 0 || glassItems.length > 0;
+
+  if (!hasData) {
+    return (
+      <div className="text-center py-16 text-slate-400">
+        <Scissors size={32} className="mx-auto mb-3 opacity-40" />
+        <p className="font-medium">No cutting list data available</p>
+        <p className="text-xs mt-1">Cutting list is generated during the estimation pipeline</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Profiles', value: profiles.length, unit: 'types' },
+          { label: 'Bars Required', value: totalBars, unit: 'pcs' },
+          { label: 'Total Cut Length', value: `${(totalLength / 1000).toFixed(1)}`, unit: 'm' },
+          { label: 'Avg Yield', value: `${avgYield.toFixed(1)}`, unit: '%' },
+        ].map((kpi) => (
+          <div key={kpi.label} className="bg-slate-50 border border-slate-200 rounded-md p-3">
+            <div className="text-xs text-slate-500">{kpi.label}</div>
+            <div className="text-lg font-bold text-[#002147]">{kpi.value} <span className="text-xs text-slate-400 font-normal">{kpi.unit}</span></div>
+          </div>
+        ))}
+      </div>
+
+      {/* Aluminum Profiles Table */}
+      {profiles.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-2 flex items-center gap-2">
+            <Scissors size={14} /> Aluminum Cutting Schedule
+          </h3>
+          <div className="overflow-x-auto border border-slate-200 rounded-md">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600">Profile</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Stock (mm)</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Cut Length (mm)</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Qty</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Bars</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Yield %</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Waste (mm)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {profiles.map((p, i) => {
+                  const yieldPct = Number(p.yield_pct || p.utilization_pct || 0);
+                  return (
+                    <tr key={i} className="hover:bg-slate-50/50">
+                      <td className="py-2 px-3 font-mono text-xs">{String(p.profile_name || p.profile_ref || p.name || `P${i + 1}`)}</td>
+                      <td className="py-2 px-3 text-right font-mono">{Number(p.stock_length_mm || 6500)}</td>
+                      <td className="py-2 px-3 text-right font-mono">{Number(p.cut_length_mm || p.length_mm || 0)}</td>
+                      <td className="py-2 px-3 text-right font-mono">{Number(p.quantity || p.qty || 0)}</td>
+                      <td className="py-2 px-3 text-right font-mono font-medium">{Number(p.bars_required || 0)}</td>
+                      <td className={`py-2 px-3 text-right font-mono font-medium ${yieldPct >= 85 ? 'text-green-600' : yieldPct >= 70 ? 'text-amber-600' : 'text-red-600'}`}>
+                        {yieldPct.toFixed(1)}
+                      </td>
+                      <td className="py-2 px-3 text-right font-mono text-slate-400">{Number(p.waste_mm || p.offcut_mm || 0)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-50 border-t border-slate-300 font-semibold text-xs">
+                  <td className="py-2 px-3 text-[#002147]">TOTALS</td>
+                  <td className="py-2 px-3"></td>
+                  <td className="py-2 px-3 text-right font-mono">{(totalLength).toFixed(0)}</td>
+                  <td className="py-2 px-3"></td>
+                  <td className="py-2 px-3 text-right font-mono">{totalBars}</td>
+                  <td className="py-2 px-3 text-right font-mono">{avgYield.toFixed(1)}</td>
+                  <td className="py-2 px-3"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Glass Schedule */}
+      {glassItems.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-[#002147] mb-2">Glass Cutting Schedule</h3>
+          <div className="overflow-x-auto border border-slate-200 rounded-md">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600">Mark</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">W (mm)</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">H (mm)</th>
+                  <th className="text-left py-2 px-3 text-xs font-semibold text-slate-600">Glass Type</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Qty</th>
+                  <th className="text-right py-2 px-3 text-xs font-semibold text-slate-600">Area (sqm)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {glassItems.map((g, i) => (
+                  <tr key={i} className="hover:bg-slate-50/50">
+                    <td className="py-2 px-3 font-mono text-xs">{String(g.mark_id || g.opening_id || `G${i + 1}`)}</td>
+                    <td className="py-2 px-3 text-right font-mono">{Number(g.width_mm || g.width || 0)}</td>
+                    <td className="py-2 px-3 text-right font-mono">{Number(g.height_mm || g.height || 0)}</td>
+                    <td className="py-2 px-3 text-xs">{String(g.glass_type || g.glass_spec || '--')}</td>
+                    <td className="py-2 px-3 text-right font-mono">{Number(g.quantity || g.qty || 1)}</td>
+                    <td className="py-2 px-3 text-right font-mono">{Number(g.area_sqm || 0).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Main Component
 
 const EstimatePage = () => {
@@ -1230,6 +1442,7 @@ const EstimatePage = () => {
     { key: 'financial', label: 'Financial', icon: BarChart3 },
     { key: 'engineering', label: 'Engineering', icon: Wrench },
     { key: 'compliance', label: 'Compliance', icon: ShieldCheck },
+    { key: 'cutting', label: 'Cutting List', icon: Scissors },
     { key: 'drawings', label: 'Drawings', icon: Ruler },
   ];
 
@@ -1449,6 +1662,9 @@ const EstimatePage = () => {
 
           {/* COMPLIANCE TAB */}
           {activeTab === 'compliance' && <ComplianceTab structural={estimate.structural_results} id={id as string} />}
+
+          {/* CUTTING LIST TAB */}
+          {activeTab === 'cutting' && <CuttingListTab cuttingList={estimate.cutting_list} />}
 
           {/* DRAWINGS TAB */}
           {activeTab === 'drawings' && (
