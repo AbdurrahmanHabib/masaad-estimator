@@ -53,17 +53,31 @@ def classify_door(w_cm):
     return 'Single Leaf Hinged Door'
 
 
-def classify_window(w_cm):
-    """Classify window type from width in cm."""
+def classify_opening(w_cm, h_cm):
+    """Classify opening type from dimensions in cm.
+
+    Rules (verified from DXF block geometry + building illustrations):
+    - Height 2200mm (full floor-to-ceiling) = Sliding Door
+    - Height < 2200mm = Sliding Window
+    - Panel count: width >= 2400mm = 4-panel, otherwise depends on width
+    """
     w_mm = w_cm * 10
-    if w_mm < 800:
-        return 'Top Hung Window', 1, 'Top Hung'
-    elif w_mm < 1800:
-        return 'Fixed Window', 1, 'Fixed'
-    elif w_mm >= 2400:
-        return '4-Panel Sliding Window', 4, 'Horizontal Sliding'
+    h_mm = h_cm * 10
+    is_door = h_mm >= 2200  # full height = door
+
+    if w_mm >= 2400:
+        panels = 4
+    elif w_mm >= 1200:
+        panels = 3
     else:
-        return '3-Panel Sliding Window', 3, 'Horizontal Sliding'
+        panels = 2
+
+    if is_door:
+        name = f'{panels}-Panel Sliding Door'
+        return name, panels, 'Horizontal Sliding'
+    else:
+        name = f'{panels}-Panel Sliding Window'
+        return name, panels, 'Horizontal Sliding'
 
 
 def detect_elevation(x, y, x_min, x_max, y_min, y_max):
@@ -120,7 +134,7 @@ for block_name in ['RST FLOOR', 'LAST']:
     classified = []
     elev_dist = {}
     for w, h, x, y in ann_positions:
-        win_type, panels, mechanism = classify_window(w)
+        win_type, panels, mechanism = classify_opening(w, h)
         classified.append((w, h, win_type, panels, mechanism))
 
         elev = detect_elevation(x, y, x_min, x_max, y_min, y_max)

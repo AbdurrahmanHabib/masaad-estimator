@@ -163,53 +163,36 @@ FACADE_DIRECTION_MAP = {
 
 def classify_glazetech_system(width_mm: float, height_mm: float, room_context: str = "", opening_type: str = "window", has_railing: bool = False) -> dict:
     """
-    Classify a window opening to the correct Glazetech profile system.
+    Classify an opening to the correct Glazetech profile system.
 
-    Rules verified from building illustrations + DXF analysis:
-    - Width < 800mm  → Top Hung Window (small bathroom/kitchen ventilation windows)
-    - Width 800-1800mm → Fixed Window (non-operable glass panels on facade)
-    - Width >= 1800mm → Sliding Window (horizontal sliding)
-      - Width >= 6000mm → Lift & Slide TB (extra-large patio doors)
-      - Width 3000-6000mm → Slim Sliding
-      - Width 1800-3000mm → Eco 500 Sliding TB
+    Rules verified from DXF block geometry + building illustrations:
+    - All openings are sliding (no fixed glass in this project)
+    - Height >= 2200mm → Sliding Door (floor-to-ceiling balcony access)
+    - Height < 2200mm → Sliding Window (bathroom/kitchen/utility)
+    - Glazetech system selection by width:
+      - Width >= 6000mm → Lift & Slide TB
+      - Width >= 3000mm → Slim Sliding
+      - Width < 3000mm → Eco 500 Sliding TB (small windows use Slim Sliding)
 
     Returns catalog entry dict with system_type, series, etc.
     """
-    # Small openings are top hung (bathroom/kitchen ventilation)
-    if width_mm < 800:
-        return GLAZETECH_CATALOG["top_hung"]
+    is_door = height_mm >= 2200
 
-    # Mid-width: fixed glass panels (non-operable facade panels)
-    if width_mm < 1800:
-        return {
-            "name": "Fixed Window",
-            "series": "FIXED",
-            "system_type": "Window - Fixed",
-            "thermal_break": False,
-            "frame_depth_mm": 50,
-            "sash_depth_mm": 0,
-            "max_sash_weight_kg": 0,
-            "max_sash_width_mm": 0,
-            "max_sash_height_mm": 0,
-            "min_width_mm": 0,
-            "glazing_range_mm": (5, 24),
-            "uf_value": 5.5,
-            "aluminum_kg_per_lm": 3.0,
-            "profiles_per_unit": 4,
-            "gasket_multiplier": 1.0,
-            "hardware_type": "None (fixed)",
-            "finish": "Powder Coated RAL",
-            "supplier": "Elite Extrusion L.L.C",
-            "application": "Non-operable facade glass panels",
-        }
-
-    # Width >= 1800mm: sliding windows — select system by width
+    # Select Glazetech system by width
     if width_mm >= 6000:
-        return GLAZETECH_CATALOG["lift_and_slide_tb"]
-    elif width_mm >= 3000:
-        return GLAZETECH_CATALOG["slim_sliding"]
+        profile = dict(GLAZETECH_CATALOG["lift_and_slide_tb"])
+    elif width_mm >= 1200:
+        profile = dict(GLAZETECH_CATALOG["eco_500_tb"])
     else:
-        return GLAZETECH_CATALOG["eco_500_tb"]
+        profile = dict(GLAZETECH_CATALOG["slim_sliding"])
+
+    # Override system_type based on door vs window
+    if is_door:
+        profile["system_type"] = "Door - Sliding"
+    else:
+        profile["system_type"] = "Window - Sliding"
+
+    return profile
 
 # Dimension patterns in text annotations
 _DIM_PATTERNS = [
