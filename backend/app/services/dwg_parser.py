@@ -124,16 +124,16 @@ GLAZETECH_CATALOG = {
     },
 }
 
-# Facade direction mapping: text labels → elevation codes
+# Facade direction mapping: text labels → elevation codes (E1/E2/E3/E4)
 FACADE_DIRECTION_MAP = {
-    "FRONT": "FRONT",
-    "BACK": "BACK",
-    "RIGHT": "RIGHT",
-    "LEFT": "LEFT",
-    "NORTH": "FRONT",
-    "SOUTH": "BACK",
-    "EAST": "RIGHT",
-    "WEST": "LEFT",
+    "FRONT": "E1",
+    "BACK": "E2",
+    "RIGHT": "E3",
+    "LEFT": "E4",
+    "NORTH": "E1",
+    "SOUTH": "E2",
+    "EAST": "E3",
+    "WEST": "E4",
 }
 
 

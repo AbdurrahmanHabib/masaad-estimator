@@ -122,10 +122,10 @@ GLASS_SPEC_BY_SYSTEM = {
 # Facade distribution rules for typical residential tower
 # When DXF has 4 named facades, distribute openings across them
 FACADE_DISTRIBUTION = {
-    "FRONT": 0.30,   # 30% of openings on front facade
-    "BACK": 0.30,    # 30% on back
-    "LEFT": 0.20,    # 20% on left
-    "RIGHT": 0.20,   # 20% on right
+    "E1": 0.30,   # 30% of openings on elevation 1 (front)
+    "E2": 0.30,   # 30% on elevation 2 (back)
+    "E3": 0.20,   # 20% on elevation 3 (right)
+    "E4": 0.20,   # 20% on elevation 4 (left)
 }
 
 
@@ -671,7 +671,7 @@ class OpeningScheduleEngine:
         building_data = dwg_extraction.get("metadata", {}).get("building_data", {})
         facades = building_data.get("facades", [])
         if not facades:
-            facades = ["FRONT", "BACK", "LEFT", "RIGHT"]
+            facades = ["E1", "E2", "E3", "E4"]
 
         for opening in dwg_openings:
             o_type = opening.get("type", "window")
