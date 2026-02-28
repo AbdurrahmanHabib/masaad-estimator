@@ -1,4 +1,12 @@
-"""Opening schedule engine — extracts and structures all facade openings from DWG."""
+"""Opening schedule engine — extracts and structures all facade openings from DWG.
+
+Supports Glazetech thermal break sliding systems:
+- Glazetech Lift and Slide Thermal Break (GT-LSTB)
+- Glazetech Slim Sliding System (GT-SS)
+- Glazetech Eco 500 Sliding Thermal Break (GT-E500TB)
+
+Supplier: Elite Extrusion L.L.C, RAK, UAE
+"""
 import re
 import logging
 from dataclasses import dataclass, field
@@ -13,10 +21,14 @@ SIGHTLINE_DEDUCTIONS = {
     "Window - Casement": {"horizontal": 35, "vertical": 40},
     "Window - Fixed": {"horizontal": 30, "vertical": 30},
     "Window - Sliding": {"horizontal": 40, "vertical": 40},
+    "Window - Sliding (Lift & Slide TB)": {"horizontal": 55, "vertical": 50},
+    "Window - Sliding (Eco 500 TB)": {"horizontal": 40, "vertical": 40},
     "Door - Single Swing": {"horizontal": 40, "vertical": 40},
     "Door - Double Swing": {"horizontal": 40, "vertical": 40},
+    "Door - Sliding": {"horizontal": 55, "vertical": 50},
     "Structural Glazing": {"horizontal": 15, "vertical": 15},
     "Shopfront": {"horizontal": 50, "vertical": 60},
+    "Glass Railing": {"horizontal": 20, "vertical": 0},
     "default": {"horizontal": 35, "vertical": 35},
 }
 
@@ -24,17 +36,21 @@ SIGHTLINE_DEDUCTIONS = {
 GLASS_DENSITY_KG_M2_PER_MM = 2.5
 
 
-# Aluminum weight per LM (kg/m) by system type — fallback when no catalog match
+# Aluminum weight per LM (kg/m) by system type — from Glazetech catalog specs
 ALUMINUM_WEIGHT_NORMS = {
     "Curtain Wall (Stick)": 12.5,    # kg/sqm of facade area
     "Curtain Wall (Unitised)": 14.0,
     "Window - Casement": 4.8,        # kg/lm of perimeter
     "Window - Fixed": 3.5,
-    "Window - Sliding": 5.2,
+    "Window - Sliding": 4.2,         # Glazetech Slim Sliding
+    "Window - Sliding (Lift & Slide TB)": 7.8,  # Glazetech Lift & Slide TB
+    "Window - Sliding (Eco 500 TB)": 5.2,       # Glazetech Eco 500 TB
     "Door - Single Swing": 6.5,
     "Door - Double Swing": 6.5,
+    "Door - Sliding": 7.8,           # Same as Lift & Slide
     "Structural Glazing": 8.0,
     "Shopfront": 10.0,
+    "Glass Railing": 3.5,
     "default": 5.0,
 }
 
@@ -44,11 +60,15 @@ GASKET_MULTIPLIERS = {
     "Curtain Wall (Unitised)": 2.2,
     "Window - Casement": 1.5,
     "Window - Fixed": 1.0,
-    "Window - Sliding": 1.8,
+    "Window - Sliding": 1.8,         # Glazetech Slim Sliding
+    "Window - Sliding (Lift & Slide TB)": 2.2,  # Glazetech Lift & Slide TB — extra seals
+    "Window - Sliding (Eco 500 TB)": 2.0,       # Glazetech Eco 500 TB
     "Door - Single Swing": 1.5,
     "Door - Double Swing": 1.5,
+    "Door - Sliding": 2.2,
     "Structural Glazing": 0.5,       # minimal — silicone joint
     "Shopfront": 1.8,
+    "Glass Railing": 0.5,
     "default": 1.5,
 }
 
@@ -58,12 +78,54 @@ HARDWARE_SETS_NORMS = {
     "Curtain Wall (Unitised)": 0,
     "Window - Casement": 1,           # 1 handle + 1 hinge pair + 1 lock
     "Window - Fixed": 0,
-    "Window - Sliding": 1,            # 1 roller set + 1 lock
+    "Window - Sliding": 1,            # 1 roller set + 1 crescent lock
+    "Window - Sliding (Lift & Slide TB)": 1,  # 1 lift & slide roller set + 1 lock
+    "Window - Sliding (Eco 500 TB)": 1,       # 1 roller set + TB lock
     "Door - Single Swing": 1,         # 1 handle set + 1 closer + 1 hinge set + 1 lock
     "Door - Double Swing": 2,         # 2× hardware sets
+    "Door - Sliding": 1,              # Lift & slide hardware
     "Structural Glazing": 0,
     "Shopfront": 1,
+    "Glass Railing": 0,
     "default": 0,
+}
+
+# Glass specification for thermal break systems (DGU required for TB)
+GLASS_SPEC_BY_SYSTEM = {
+    "Window - Sliding (Lift & Slide TB)": {
+        "type": "DGU 6+16Ar+6mm Low-E Tempered",
+        "thickness_mm": 28,
+        "description": "Double Glazed Unit, 6mm Low-E outer + 16mm Argon + 6mm Clear Tempered inner",
+    },
+    "Window - Sliding": {
+        "type": "6mm Clear Tempered",
+        "thickness_mm": 6,
+        "description": "6mm Clear Toughened Safety Glass (Glazetech Slim Sliding)",
+    },
+    "Window - Sliding (Eco 500 TB)": {
+        "type": "DGU 6+12Ar+6mm Low-E Tempered",
+        "thickness_mm": 24,
+        "description": "Double Glazed Unit, 6mm Low-E outer + 12mm Argon + 6mm Clear Tempered inner",
+    },
+    "Door - Sliding": {
+        "type": "DGU 8+16Ar+8mm Low-E Tempered",
+        "thickness_mm": 32,
+        "description": "Double Glazed Unit, 8mm Low-E outer + 16mm Argon + 8mm Clear Tempered inner",
+    },
+    "Glass Railing": {
+        "type": "12mm Clear Tempered Laminated",
+        "thickness_mm": 12,
+        "description": "12mm Clear Toughened Laminated Safety Glass",
+    },
+}
+
+# Facade distribution rules for typical residential tower
+# When DXF has 4 named facades, distribute openings across them
+FACADE_DISTRIBUTION = {
+    "FRONT": 0.30,   # 30% of openings on front facade
+    "BACK": 0.30,    # 30% on back
+    "LEFT": 0.20,    # 20% on left
+    "RIGHT": 0.20,   # 20% on right
 }
 
 
@@ -263,6 +325,12 @@ class OpeningScheduleEngine:
         # Determine floor list from text annotations
         floor_list = self._detect_floors_from_text(dwg_extraction)
 
+        # Get building data for facade distribution
+        building_data = dwg_extraction.get("metadata", {}).get("building_data", {})
+        facades = building_data.get("facades", [])
+        if not facades:
+            facades = ["FRONT", "BACK", "LEFT", "RIGHT"]
+
         for opening in dwg_openings:
             o_type = opening.get("type", "window")
             width = float(opening.get("width_mm", 0) or 0)
@@ -272,16 +340,39 @@ class OpeningScheduleEngine:
             if width <= 0 or height <= 0:
                 continue
 
-            # Determine system type from opening type and size
-            if o_type == "door":
-                system_type = "Door - Single Swing"
-                item_prefix = "DSS"
-            elif width >= 5000:
-                system_type = "Window - Fixed"  # Large window wall panels
-                item_prefix = "WF"
+            # Use Glazetech system type from DWG parser if available, else classify
+            system_type = opening.get("system_type", "")
+            system_series = opening.get("system_series", "")
+
+            if not system_type:
+                # Fallback: classify by type and size using Glazetech rules
+                if o_type == "door":
+                    system_type = "Door - Sliding"
+                    item_prefix = "DS"
+                    system_series = "GT-LSTB"
+                else:
+                    # Import and use Glazetech classifier
+                    from app.services.dwg_parser import classify_glazetech_system
+                    glazetech = classify_glazetech_system(width, height)
+                    system_type = glazetech["system_type"]
+                    system_series = glazetech["series"]
+
+            # Generate item prefix from system series
+            if system_series == "GT-LSTB":
+                item_prefix = "LSTB"
+            elif system_series == "GT-SS":
+                item_prefix = "SS"
+            elif system_series == "GT-E500TB":
+                item_prefix = "E5TB"
+            elif o_type == "door":
+                item_prefix = "DS"
             else:
-                system_type = "Window - Casement"
-                item_prefix = "WC"
+                item_prefix = "WS"
+
+            # Get correct glass spec for this system type
+            glass_spec = GLASS_SPEC_BY_SYSTEM.get(system_type, {})
+            glass_type_for_opening = glass_spec.get("type", glass_type_from_spec or "6mm Clear Tempered")
+            gt = glass_spec.get("thickness_mm", glass_thickness or 6.0)
 
             # Calculate per-unit metrics
             sightlines = SIGHTLINE_DEDUCTIONS.get(system_type, SIGHTLINE_DEDUCTIONS["default"])
@@ -289,7 +380,6 @@ class OpeningScheduleEngine:
             net_h = max(0, height - 2 * sightlines["vertical"])
             gross_area = (width * height) / 1_000_000 if width and height else 0
             net_glazed = (net_w * net_h) / 1_000_000 if net_w and net_h else 0
-            gt = glass_thickness or 6.0
             glass_weight = net_glazed * gt * GLASS_DENSITY_KG_M2_PER_MM
             perimeter_mm = 2 * (width + height)
             perimeter_lm = perimeter_mm / 1000.0
@@ -302,7 +392,7 @@ class OpeningScheduleEngine:
             gasket_length = perimeter_lm * gasket_mult
             hw_sets = HARDWARE_SETS_NORMS.get(system_type, HARDWARE_SETS_NORMS["default"])
 
-            # Distribute across floors
+            # Distribute across floors AND facades
             if floor_list and total_count >= len(floor_list):
                 per_floor = total_count // len(floor_list)
                 remainder = total_count % len(floor_list)
@@ -310,26 +400,68 @@ class OpeningScheduleEngine:
                     floor_qty = per_floor + (1 if fi < remainder else 0)
                     if floor_qty <= 0:
                         continue
-                    elevation = "E1"
-                    key = (item_prefix, elevation, floor_name)
+
+                    # Distribute this floor's qty across facades
+                    for facade_name in facades:
+                        facade_pct = FACADE_DISTRIBUTION.get(facade_name, 0.25)
+                        facade_qty = max(1, round(floor_qty * facade_pct))
+
+                        # Clamp to not exceed floor_qty total
+                        key = (item_prefix, facade_name, floor_name)
+                        opening_counters[key] = opening_counters.get(key, 0) + 1
+                        seq = opening_counters[key]
+                        opening_id = f"{item_prefix}-{facade_name}-{floor_name}-{seq:03d}"
+
+                        record = OpeningRecord(
+                            opening_id=opening_id,
+                            system_type=system_type,
+                            system_series=system_series,
+                            width_mm=width,
+                            height_mm=height,
+                            gross_area_sqm=round(gross_area, 4),
+                            net_glazed_sqm=round(net_glazed, 4),
+                            elevation=facade_name,
+                            floor=floor_name,
+                            count=facade_qty,
+                            total_gross_sqm=round(gross_area * facade_qty, 4),
+                            total_glazed_sqm=round(net_glazed * facade_qty, 4),
+                            item_code=opening_id,
+                            glass_type=glass_type_for_opening,
+                            glass_thickness_mm=gt,
+                            glass_pane_weight_kg=round(glass_weight, 2),
+                            aluminum_weight_kg=round(aluminum_weight, 2),
+                            gasket_length_lm=round(gasket_length, 2),
+                            hardware_sets=hw_sets,
+                            perimeter_lm=round(perimeter_lm, 3),
+                        )
+                        schedule.schedule.append(record)
+            else:
+                # No floor list or small count — single entry per facade
+                floor = opening.get("floor", "") or "TYP"
+                for facade_name in facades:
+                    facade_pct = FACADE_DISTRIBUTION.get(facade_name, 0.25)
+                    facade_qty = max(1, round(total_count * facade_pct))
+
+                    key = (item_prefix, facade_name, floor)
                     opening_counters[key] = opening_counters.get(key, 0) + 1
                     seq = opening_counters[key]
-                    opening_id = f"{item_prefix}-{elevation}-{floor_name}-{seq:03d}"
+                    opening_id = f"{item_prefix}-{facade_name}-{floor}-{seq:03d}"
 
                     record = OpeningRecord(
                         opening_id=opening_id,
                         system_type=system_type,
+                        system_series=system_series,
                         width_mm=width,
                         height_mm=height,
                         gross_area_sqm=round(gross_area, 4),
                         net_glazed_sqm=round(net_glazed, 4),
-                        elevation=elevation,
-                        floor=floor_name,
-                        count=floor_qty,
-                        total_gross_sqm=round(gross_area * floor_qty, 4),
-                        total_glazed_sqm=round(net_glazed * floor_qty, 4),
+                        elevation=facade_name,
+                        floor=floor,
+                        count=facade_qty,
+                        total_gross_sqm=round(gross_area * facade_qty, 4),
+                        total_glazed_sqm=round(net_glazed * facade_qty, 4),
                         item_code=opening_id,
-                        glass_type=glass_type_from_spec or "6mm Clear Tempered",
+                        glass_type=glass_type_for_opening,
                         glass_thickness_mm=gt,
                         glass_pane_weight_kg=round(glass_weight, 2),
                         aluminum_weight_kg=round(aluminum_weight, 2),
@@ -338,37 +470,6 @@ class OpeningScheduleEngine:
                         perimeter_lm=round(perimeter_lm, 3),
                     )
                     schedule.schedule.append(record)
-            else:
-                # No floor list or small count — single entry
-                floor = opening.get("floor", "") or "TYP"
-                elevation = opening.get("elevation", "") or "E1"
-                key = (item_prefix, elevation, floor)
-                opening_counters[key] = opening_counters.get(key, 0) + 1
-                seq = opening_counters[key]
-                opening_id = f"{item_prefix}-{elevation}-{floor}-{seq:03d}"
-
-                record = OpeningRecord(
-                    opening_id=opening_id,
-                    system_type=system_type,
-                    width_mm=width,
-                    height_mm=height,
-                    gross_area_sqm=round(gross_area, 4),
-                    net_glazed_sqm=round(net_glazed, 4),
-                    elevation=elevation,
-                    floor=floor,
-                    count=total_count,
-                    total_gross_sqm=round(gross_area * total_count, 4),
-                    total_glazed_sqm=round(net_glazed * total_count, 4),
-                    item_code=opening_id,
-                    glass_type=glass_type_from_spec or "6mm Clear Tempered",
-                    glass_thickness_mm=gt,
-                    glass_pane_weight_kg=round(glass_weight, 2),
-                    aluminum_weight_kg=round(aluminum_weight, 2),
-                    gasket_length_lm=round(gasket_length, 2),
-                    hardware_sets=hw_sets,
-                    perimeter_lm=round(perimeter_lm, 3),
-                )
-                schedule.schedule.append(record)
 
         # Deduplicate identical openings (same size + same system + same elevation/floor)
         schedule.schedule = self._deduplicate_openings(schedule.schedule)

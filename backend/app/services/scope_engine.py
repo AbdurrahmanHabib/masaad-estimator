@@ -128,13 +128,40 @@ FACADE_TAXONOMY: dict[str, dict] = {
     "Window - Sliding": {
         "layer_patterns": [
             "a-win-s", "sliding win", "a-win-03", "slide-win",
+            "pencere", "penc-yazi", ".pencereler", "dograma",
         ],
         "spec_keywords": [
             "sliding window", "horizontal sliding", "hs window",
+            "glazetech slim sliding", "slim sliding system", "gt-ss",
         ],
-        "item_prefix": "WS",
+        "item_prefix": "SS",
         "unit": "nr",
-        "typical_layers": ["A-WIN-S", "WIN-SLIDE"],
+        "typical_layers": ["A-WIN-S", "WIN-SLIDE", "Pencere", "penc-yazi"],
+    },
+    "Window - Sliding (Lift & Slide TB)": {
+        "layer_patterns": [
+            "lift.?slide", "lift-slide", "lstb", "gt-lstb",
+            "pencere", "balkon",
+        ],
+        "spec_keywords": [
+            "lift and slide", "lift & slide", "thermal break",
+            "glazetech lift and slide", "gt-lstb", "heavy sliding",
+        ],
+        "item_prefix": "LSTB",
+        "unit": "nr",
+        "typical_layers": ["WIN-LSTB", "GT-LSTB"],
+    },
+    "Window - Sliding (Eco 500 TB)": {
+        "layer_patterns": [
+            "eco.?500", "eco500", "gt-e500", "e500tb",
+        ],
+        "spec_keywords": [
+            "eco 500", "eco-500", "eco500", "glazetech eco",
+            "gt-e500tb", "economic thermal break",
+        ],
+        "item_prefix": "E5TB",
+        "unit": "nr",
+        "typical_layers": ["WIN-E500TB", "GT-E500TB"],
     },
     "Window - Awning / Top-Hung": {
         "layer_patterns": [
@@ -197,13 +224,15 @@ FACADE_TAXONOMY: dict[str, dict] = {
     "Door - Sliding": {
         "layer_patterns": [
             "a-dr-sl", "a-dr-03", "slide-dr", "sliding door",
+            "kapi", "kapı", "b_kapi", "door",
         ],
         "spec_keywords": [
             "sliding door", "patio door", "bi-parting", "bypass door",
+            "lift and slide door", "glazetech", "gt-lstb door",
         ],
-        "item_prefix": "DSL",
+        "item_prefix": "DS",
         "unit": "nr",
-        "typical_layers": ["A-DR-SL", "DOOR-SLIDE"],
+        "typical_layers": ["A-DR-SL", "DOOR-SLIDE", "kapi"],
     },
     "Door - Frameless (Patch-Fit)": {
         "layer_patterns": [

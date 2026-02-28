@@ -7,6 +7,9 @@ Handles messy real-world files:
 - No consistent layering or naming
 - Large files (10MB+)
 - Spatial clustering to group separate drawings
+- Turkish architectural DXF files with slash-format dimensions
+- Multi-view detection (plan/elevation/section)
+- Glazetech thermal break profile system classification
 
 Dependencies:
   - ezdxf (required, v1.1.0)
@@ -41,6 +44,120 @@ CLUSTER_DISTANCE_MM = 500.0
 # Minimum dimensions for a valid panel (mm)
 MIN_PANEL_DIM_MM = 100.0
 MAX_PANEL_DIM_MM = 15000.0
+
+# ── Glazetech Thermal Break Profile Catalog ──────────────────────────────────
+# Elite Extrusion L.L.C / Glazetech — RAK, UAE
+# Three systems specified by client for AL KABIR TOWER:
+
+GLAZETECH_CATALOG = {
+    "lift_and_slide_tb": {
+        "name": "Glazetech Lift and Slide Thermal Break",
+        "series": "GT-LSTB",
+        "system_type": "Window - Sliding (Lift & Slide TB)",
+        "thermal_break": True,
+        "frame_depth_mm": 160,
+        "sash_depth_mm": 76,
+        "max_sash_weight_kg": 400,
+        "max_sash_width_mm": 3200,
+        "max_sash_height_mm": 3000,
+        "min_width_mm": 1800,
+        "glazing_range_mm": (24, 52),
+        "uf_value": 2.0,  # W/m²K
+        "air_permeability": "Class 4",
+        "water_tightness": "Class E1200",
+        "wind_resistance": "Class C5",
+        "aluminum_kg_per_lm": 7.8,
+        "profiles_per_unit": 8,  # frame top/bottom/sides + sash top/bottom/sides + interlock + track
+        "gasket_multiplier": 2.2,
+        "hardware_type": "Lift & Slide roller + lock",
+        "finish": "Powder Coated RAL",
+        "supplier": "Elite Extrusion L.L.C",
+        "application": "Large balcony doors, patio doors",
+    },
+    "slim_sliding": {
+        "name": "Glazetech Slim Sliding System",
+        "series": "GT-SS",
+        "system_type": "Window - Sliding",
+        "thermal_break": False,
+        "frame_depth_mm": 50,
+        "sash_depth_mm": 45,
+        "max_sash_weight_kg": 150,
+        "max_sash_width_mm": 2500,
+        "max_sash_height_mm": 2500,
+        "min_width_mm": 1000,
+        "glazing_range_mm": (5, 24),
+        "uf_value": 5.5,  # W/m²K (no TB)
+        "air_permeability": "Class 3",
+        "water_tightness": "Class 7A",
+        "wind_resistance": "Class C3",
+        "aluminum_kg_per_lm": 4.2,
+        "profiles_per_unit": 6,
+        "gasket_multiplier": 1.8,
+        "hardware_type": "Sliding roller + crescent lock",
+        "finish": "Powder Coated RAL",
+        "supplier": "Elite Extrusion L.L.C",
+        "application": "Bedroom/living room windows",
+    },
+    "eco_500_tb": {
+        "name": "Glazetech Eco 500 Sliding Thermal Break",
+        "series": "GT-E500TB",
+        "system_type": "Window - Sliding (Eco 500 TB)",
+        "thermal_break": True,
+        "frame_depth_mm": 50,
+        "sash_depth_mm": 50,
+        "max_sash_weight_kg": 200,
+        "max_sash_width_mm": 2000,
+        "max_sash_height_mm": 2500,
+        "min_width_mm": 800,
+        "glazing_range_mm": (20, 36),
+        "uf_value": 3.0,  # W/m²K
+        "air_permeability": "Class 4",
+        "water_tightness": "Class 9A",
+        "wind_resistance": "Class C4",
+        "aluminum_kg_per_lm": 5.2,
+        "profiles_per_unit": 7,
+        "gasket_multiplier": 2.0,
+        "hardware_type": "Sliding roller + TB lock",
+        "finish": "Powder Coated RAL",
+        "supplier": "Elite Extrusion L.L.C",
+        "application": "Kitchen/utility windows, economic thermal break",
+    },
+}
+
+# Facade direction mapping: text labels → elevation codes
+FACADE_DIRECTION_MAP = {
+    "FRONT": "FRONT",
+    "BACK": "BACK",
+    "RIGHT": "RIGHT",
+    "LEFT": "LEFT",
+    "NORTH": "FRONT",
+    "SOUTH": "BACK",
+    "EAST": "RIGHT",
+    "WEST": "LEFT",
+}
+
+
+def classify_glazetech_system(width_mm: float, height_mm: float, room_context: str = "", opening_type: str = "window") -> dict:
+    """
+    Classify a window opening to the correct Glazetech profile system.
+
+    Rules (from client WhatsApp + catalog analysis for AL KABIR TOWER):
+    - Width >= 6000mm → Lift & Slide TB (extra-large balcony/patio doors, 7000mm)
+    - Balcony context → Lift & Slide TB regardless of size
+    - Width 3000-6000mm → Slim Sliding (regular bedroom/living windows: 5300, 3650, 3400mm)
+    - Width < 3000mm → Eco 500 Sliding TB (small windows, economic thermal break)
+
+    Returns catalog entry dict with system_type, series, etc.
+    """
+    room_lower = room_context.lower() if room_context else ""
+    is_balcony = any(kw in room_lower for kw in ["balcon", "patio", "terrace"])
+
+    if is_balcony or width_mm >= 6000:
+        return GLAZETECH_CATALOG["lift_and_slide_tb"]
+    elif width_mm >= 3000:
+        return GLAZETECH_CATALOG["slim_sliding"]
+    else:
+        return GLAZETECH_CATALOG["eco_500_tb"]
 
 # Dimension patterns in text annotations
 _DIM_PATTERNS = [
@@ -912,6 +1029,43 @@ class DWGParserService:
         unique_texts = list(dict.fromkeys(all_text_annotations))  # preserve order, remove dupes
 
         # ── Build result ──────────────────────────────────────────────────────
+        # Enrich openings with Glazetech system classification
+        enriched_openings = []
+        for o in deduped_openings:
+            if o.type == "door":
+                # Doors get Door - Sliding system (same Lift & Slide hardware)
+                system_type = "Door - Sliding"
+                system_series = "GT-LSTB"
+                system_name = "Glazetech Lift and Slide Thermal Break (Door)"
+                thermal_break = True
+                glazetech_profile = GLAZETECH_CATALOG["lift_and_slide_tb"]
+            else:
+                glazetech_profile = classify_glazetech_system(o.width_mm, o.height_mm, opening_type=o.type)
+                system_type = glazetech_profile["system_type"]
+                system_series = glazetech_profile["series"]
+                system_name = glazetech_profile["name"]
+                thermal_break = glazetech_profile["thermal_break"]
+
+            enriched_openings.append({
+                "type": o.type,
+                "width_mm": o.width_mm,
+                "height_mm": o.height_mm,
+                "area_sqm": o.area_sqm,
+                "block_name": o.block_name,
+                "count": o.count,
+                "layer": o.layer,
+                "floor": getattr(o, 'floor', ''),
+                "elevation": getattr(o, 'elevation', ''),
+                "system_type": system_type,
+                "system_series": system_series,
+                "system_name": system_name,
+                "thermal_break": thermal_break,
+                "glazetech_profile": glazetech_profile,
+            })
+
+        # Include building data from Turkish extraction
+        building_data = getattr(self, '_turkish_floor_data', {})
+
         return {
             "layouts": layouts_info,
             "panels": [
@@ -925,20 +1079,7 @@ class DWGParserService:
                 }
                 for p in deduped_panels
             ],
-            "openings": [
-                {
-                    "type": o.type,
-                    "width_mm": o.width_mm,
-                    "height_mm": o.height_mm,
-                    "area_sqm": o.area_sqm,
-                    "block_name": o.block_name,
-                    "count": o.count,
-                    "layer": o.layer,
-                    "floor": getattr(o, 'floor', ''),
-                    "elevation": getattr(o, 'elevation', ''),
-                }
-                for o in deduped_openings
-            ],
+            "openings": enriched_openings,
             "text_annotations": unique_texts[:500],  # Cap at 500 to avoid huge responses
             "blocks": [
                 {
@@ -961,6 +1102,10 @@ class DWGParserService:
                 "cluster_classification": cluster_classification,
                 "paper_space_views": paper_space_views,
                 "entity_to_cluster": {str(k): v for k, v in entity_to_cluster.items()},
+                "building_data": building_data,
+                "glazetech_catalog": {k: {kk: vv for kk, vv in v.items() if kk != "glazing_range_mm"} for k, v in GLAZETECH_CATALOG.items()},
+                "profile_supplier": "Elite Extrusion L.L.C",
+                "thermal_break_required": True,
             },
         }
 
@@ -1197,7 +1342,72 @@ class DWGParserService:
             f"{num_typical} typical floors, {num_plan_copies} plan copies"
         )
 
-        # ── Step 6: Create OpeningInfo records ───────────────────────────────
+        # ── Step 5b: Extract facade labels and building metadata ─────────────
+        facade_labels = []  # (facade_name, x, y)
+        section_labels = []
+        room_labels = []  # (room_type, x, y)
+        railing_labels = []
+        for e in entities:
+            try:
+                if e.dxftype() not in ('TEXT', 'MTEXT'):
+                    continue
+                txt = e.dxf.text.strip() if e.dxftype() == 'TEXT' else (e.text or '').strip()
+                txt_upper = txt.upper()
+                x = e.dxf.insert.x if hasattr(e.dxf, 'insert') else 0
+                y = e.dxf.insert.y if hasattr(e.dxf, 'insert') else 0
+
+                # Facade labels
+                if 'FACADE' in txt_upper:
+                    for direction in FACADE_DIRECTION_MAP:
+                        if direction in txt_upper:
+                            facade_labels.append((FACADE_DIRECTION_MAP[direction], x, y))
+                            break
+
+                # Section labels
+                if 'SECTION' in txt_upper:
+                    section_labels.append((txt.strip(), x, y))
+
+                # Room labels (on yazi layer)
+                layer = e.dxf.layer if hasattr(e.dxf, 'layer') else ''
+                if layer.lower() in ('yazi', 'yazı'):
+                    if 'BALCON' in txt_upper:
+                        room_labels.append(('BALCONY', x, y))
+                    elif 'RAILING' in txt_upper:
+                        railing_labels.append(('RAILING', x, y))
+                    elif any(kw in txt_upper for kw in ['BEDROOM', 'KITCHEN', 'HALL', 'LIVING', 'BATHROOM', 'WC']):
+                        room_labels.append((txt_upper.strip(), x, y))
+            except Exception:
+                continue
+
+        # ── Step 5c: Extract floor-to-floor heights from section ──────────────
+        floor_heights = {}
+        section_floor_texts = []
+        for e in entities:
+            try:
+                if e.dxftype() != 'TEXT':
+                    continue
+                txt = e.dxf.text.strip().upper()
+                x = e.dxf.insert.x if hasattr(e.dxf, 'insert') else 0
+                y = e.dxf.insert.y if hasattr(e.dxf, 'insert') else 0
+                # Only look near section areas
+                if section_labels and any(abs(x - sx) < 10000 for _, sx, _ in section_labels):
+                    if 'FLOOR' in txt or 'BASEMENT' in txt:
+                        section_floor_texts.append((txt, y))
+            except Exception:
+                continue
+
+        if len(section_floor_texts) >= 2:
+            section_floor_texts.sort(key=lambda t: t[1])  # sort by Y (bottom to top)
+            for i in range(1, len(section_floor_texts)):
+                prev_name, prev_y = section_floor_texts[i - 1]
+                curr_name, curr_y = section_floor_texts[i]
+                delta_y = abs(curr_y - prev_y)
+                # Interpret as cm → meters
+                height_m = round(delta_y / 100, 2)
+                if 2.0 <= height_m <= 6.0:
+                    floor_heights[curr_name] = height_m
+
+        # ── Step 6: Create OpeningInfo records with Glazetech classification ──
         for (w_mm, h_mm), total_count in dim_counter.most_common():
             # Count per floor = total annotations / number of plan copies
             per_floor = max(1, total_count // max(num_plan_copies, 1))
@@ -1205,21 +1415,16 @@ class DWGParserService:
             # Total across all typical floors
             total_qty = per_floor * num_typical
 
-            # Determine opening type from size
-            if w_mm >= 5000:
-                opening_type = "window"  # Large window wall / curtain wall panel
-                block_name = f"WW-{int(w_mm)}x{int(h_mm)}"
-            elif w_mm >= 2000:
-                opening_type = "window"
-                block_name = f"WIN-{int(w_mm)}x{int(h_mm)}"
-            else:
-                opening_type = "window"
-                block_name = f"WIN-{int(w_mm)}x{int(h_mm)}"
+            # Classify to correct Glazetech system based on size
+            glazetech = classify_glazetech_system(w_mm, h_mm)
+            system_type = glazetech["system_type"]
+            series = glazetech["series"]
+            block_name = f"{series}-{int(w_mm)}x{int(h_mm)}"
 
             area_sqm = round(w_mm * h_mm / 1_000_000, 4)
 
             opening = OpeningInfo(
-                type=opening_type,
+                type="window",
                 width_mm=round(w_mm, 1),
                 height_mm=round(h_mm, 1),
                 area_sqm=area_sqm,
@@ -1227,7 +1432,7 @@ class DWGParserService:
                 count=total_qty,
                 layer="Pencere",
             )
-            # Attach floor info as attributes
+            # Attach floor and system info as attributes
             opening.floor = ""  # Will be distributed across floors by opening_schedule_engine
             opening.elevation = ""
 
@@ -1299,7 +1504,22 @@ class DWGParserService:
                 "num_typical": num_typical,
                 "total_floors": len(all_floors),
                 "floor_area_sqm": 841.94,  # Will be overridden if found in text
+                "facades": [f[0] for f in facade_labels],
+                "facade_positions": {f[0]: {"x": round(f[1], 1), "y": round(f[2], 1)} for f in facade_labels},
+                "sections": [s[0] for s in section_labels],
+                "floor_heights_m": floor_heights,
+                "balcony_count": len([r for r in room_labels if r[0] == 'BALCONY']),
+                "railing_count": len(railing_labels),
+                "room_counts": {},
+                "glazetech_systems": list(GLAZETECH_CATALOG.keys()),
+                "profile_supplier": "Elite Extrusion L.L.C",
+                "thermal_break_required": True,
             }
+
+            # Count rooms
+            from collections import Counter as _Counter
+            room_type_counts = _Counter(r[0] for r in room_labels)
+            self._turkish_floor_data["room_counts"] = dict(room_type_counts)
 
             # Try to extract floor area from text
             for e in entities:
