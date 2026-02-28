@@ -1008,3 +1008,59 @@ async def download_specific_drawing(
         raise HTTPException(status_code=404, detail="Drawing generation failed")
 
     return FileResponse(filepath, media_type="application/pdf", filename=filename)
+
+
+@router.get("/estimate/{estimate_id}/shop-drawings")
+async def get_shop_drawings(
+    estimate_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate and return professional shop drawing PDF for an estimate."""
+    from app.services.shop_drawing_engine import generate_shop_drawings
+    from fastapi.responses import Response
+
+    result = await db.execute(select(Estimate).where(Estimate.id == estimate_id))
+    estimate = result.scalar_one_or_none()
+    if not estimate:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+
+    opening_schedule = estimate.opening_schedule_json or {}
+
+    # Get project name
+    project_name = f"Project {estimate_id[:8]}"
+    if estimate.project_id:
+        proj_result = await db.execute(
+            select(Project).where(Project.id == estimate.project_id)
+        )
+        project = proj_result.scalar_one_or_none()
+        if project:
+            project_name = project.name or project_name
+
+    # Get tenant branding
+    company_name = None
+    if estimate.tenant_id:
+        tenant_result = await db.execute(
+            select(Tenant).where(Tenant.id == estimate.tenant_id)
+        )
+        tenant = tenant_result.scalar_one_or_none()
+        if tenant:
+            company_name = tenant.company_name
+
+    try:
+        pdf_bytes = generate_shop_drawings(
+            opening_schedule=opening_schedule,
+            project_name=project_name,
+            drawing_number_prefix=f"MAS-SHD-{estimate_id[:8].upper()}",
+            company_name=company_name,
+        )
+    except Exception as e:
+        logger.error(f"Shop drawing generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Shop drawing generation failed: {str(e)[:200]}")
+
+    filename = f"shop_drawings_{estimate_id[:8]}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

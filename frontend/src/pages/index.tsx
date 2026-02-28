@@ -345,10 +345,12 @@ export default function Dashboard() {
     }
   };
 
-  const handleEstimateDownload = async (estimateId: string, format: 'pdf' | 'excel' | 'drawings') => {
+  const handleEstimateDownload = async (estimateId: string, format: 'pdf' | 'excel' | 'drawings' | 'shop-drawings') => {
     try {
       const path = format === 'drawings'
         ? `/api/reports/estimate/${estimateId}/drawings`
+        : format === 'shop-drawings'
+        ? `/api/reports/estimate/${estimateId}/shop-drawings`
         : `/api/reports/estimate/${estimateId}/${format}`;
       const resp = await apiFetch(path);
       if (!resp.ok) throw new Error(`${format} download failed`);
@@ -741,10 +743,10 @@ export default function Dashboard() {
                                     <Download size={11} /> Excel
                                   </button>
                                   <button
-                                    onClick={() => handleEstimateDownload(est.estimate_id, 'drawings')}
+                                    onClick={() => handleEstimateDownload(est.estimate_id, 'shop-drawings')}
                                     className="px-3 py-1 bg-[#7c3aed] text-white rounded text-[10px] font-medium hover:bg-[#6d28d9] transition-colors flex items-center gap-1"
                                   >
-                                    <Download size={11} /> Drawings
+                                    <Download size={11} /> Shop Drawings
                                   </button>
                                 </div>
                               </div>
