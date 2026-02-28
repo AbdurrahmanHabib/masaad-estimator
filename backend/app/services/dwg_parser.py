@@ -1709,20 +1709,19 @@ class DWGParserService:
 
             openings.append(opening)
 
-        # ── Step 7: Add door openings from fm-door* inserts ─────────────────
-        # Known Turkish door block base widths (cm). Actual width = base × xscale.
+        # ── Step 7: Add door openings from kapi-yazi annotations ─────────────
+        # Use architect's door dimension annotations (e.g. "90/220") on kapi-yazi
+        # layer instead of deriving from xscale, which can be slightly off.
+        _DOOR_DIM_LAYER = re.compile(r'(?i)kap.*yaz')
+        _DOOR_H_CM = 220  # standard door height in Turkish DXFs
+        # Fallback: known door block base widths for modelspace path
         _DOOR_BASE_W_CM = {'fm-door1': 100, 'fm-door2': 150, 'fm-door3': 200,
                            'fm-door4': 200, 'fm-door5': 250}
-        _DOOR_H_CM = 220  # standard door height in Turkish DXFs
 
         if use_block_level:
-            # Block-level path: extract door INSERTs from inside block definitions
-            # (same approach as window annotations in Step 1b)
+            # Block-level path: extract door dimensions from kapi-yazi text annotations
             from collections import Counter as _DoorCtr
-            aggregated_doors = _DoorCtr()  # (block_name, actual_w_cm) -> total_count
-
-            for bname_outer, dim_counts in block_openings_data.items():
-                pass  # block_openings_data only has window dims, not doors
+            aggregated_doors = _DoorCtr()  # (w_cm, h_cm) -> total_count
 
             for bname_outer in block_insert_counts:
                 if bname_outer.startswith('*') or bname_outer.startswith('_'):
@@ -1741,26 +1740,29 @@ class DWGParserService:
                 door_counts_in_block = _DoorCtr()
                 for e in block_def:
                     try:
-                        if e.dxftype() != 'INSERT':
+                        if e.dxftype() != 'TEXT':
                             continue
-                        inner_bname = e.dxf.name
-                        if inner_bname not in _DOOR_BASE_W_CM:
+                        layer = e.dxf.layer if hasattr(e.dxf, 'layer') else ''
+                        if not _DOOR_DIM_LAYER.search(layer):
                             continue
-                        xs = round(abs(getattr(e.dxf, 'xscale', 1.0) or 1.0), 2)
-                        actual_w_cm = round(_DOOR_BASE_W_CM[inner_bname] * xs)
-                        door_counts_in_block[(inner_bname, actual_w_cm)] += 1
+                        text = e.dxf.text.strip()
+                        m = _DIM_PATTERN_SLASH_CM.match(text)
+                        if m:
+                            dw_cm = int(m.group(1))
+                            dh_cm = int(m.group(2))
+                            door_counts_in_block[(dw_cm, dh_cm)] += 1
                     except Exception:
                         continue
 
-                for (dblock, dw_cm), per_block in door_counts_in_block.items():
-                    aggregated_doors[(dblock, dw_cm)] += per_block * num_inserts
+                for (dw_cm, dh_cm), per_block in door_counts_in_block.items():
+                    aggregated_doors[(dw_cm, dh_cm)] += per_block * num_inserts
 
-            for (dblock, dw_cm), total_qty in aggregated_doors.items():
+            for (dw_cm, dh_cm), total_qty in aggregated_doors.items():
                 w_mm = dw_cm * 10.0
-                h_mm = _DOOR_H_CM * 10.0
+                h_mm = dh_cm * 10.0
 
-                # Classify door type from block name and width
-                if dblock == 'fm-door4' or dblock == 'fm-door3':
+                # Classify door type from width
+                if w_mm >= 1800:
                     door_sys = "Door - Double Swing"
                 else:
                     door_sys = "Door - Single Swing"
@@ -1770,7 +1772,7 @@ class DWGParserService:
                     width_mm=w_mm,
                     height_mm=h_mm,
                     area_sqm=round(w_mm * h_mm / 1_000_000, 4),
-                    block_name=dblock,
+                    block_name=f"door-{dw_cm}x{dh_cm}",
                     count=total_qty,
                     layer="kapi",
                 )
@@ -1781,7 +1783,7 @@ class DWGParserService:
             if aggregated_doors:
                 logger.info(
                     f"Turkish DXF: {len(aggregated_doors)} door types from "
-                    f"block-level extraction, {sum(aggregated_doors.values())} total"
+                    f"kapi-yazi annotations, {sum(aggregated_doors.values())} total"
                 )
 
         else:

@@ -43,13 +43,14 @@ for e in doc.modelspace():
 RST_INSERTS = msp_inserts.get('RST FLOOR', 0)  # 9
 LAST_INSERTS = msp_inserts.get('LAST', 0)       # 1
 
-DOOR_BASE_W = {'fm-door1': 100, 'fm-door4': 200}
 DOOR_H_CM = 220
-DOOR_TYPES = {
-    ('fm-door1', 88): 'Single Leaf Hinged Door',
-    ('fm-door1', 98): 'Single Leaf Hinged Door',
-    ('fm-door4', 198): 'Double Leaf Hinged Entrance Door',
-}
+_DOOR_DIM_LAYER = re.compile(r'(?i)kap.*yaz')
+
+def classify_door(w_cm):
+    """Classify door type from width in cm (architect's annotation)."""
+    if w_cm >= 180:
+        return 'Double Leaf Hinged Entrance Door'
+    return 'Single Leaf Hinged Door'
 
 
 def classify_window(w_cm):
@@ -131,16 +132,19 @@ for block_name in ['RST FLOOR', 'LAST']:
     window_classified[block_name] = Counter(classified)
     window_elevations[block_name] = elev_dist
 
-    # Extract doors
+    # Extract doors from kapi-yazi annotations (architect's stated dimensions)
     doors = []
     for e in block:
         try:
-            if e.dxftype() == 'INSERT':
-                bname = e.dxf.name
-                if bname in DOOR_BASE_W:
-                    xsc = round(abs(getattr(e.dxf, 'xscale', 1.0) or 1.0), 2)
-                    actual_w = round(DOOR_BASE_W[bname] * xsc)
-                    doors.append((bname, actual_w))
+            if e.dxftype() == 'TEXT':
+                layer = e.dxf.layer if hasattr(e.dxf, 'layer') else ''
+                if _DOOR_DIM_LAYER.search(layer):
+                    text = e.dxf.text.strip()
+                    m = _DIM.match(text)
+                    if m:
+                        dw, dh = int(m.group(1)), int(m.group(2))
+                        dtype = classify_door(dw)
+                        doors.append((dw, dtype))
         except:
             continue
     door_per_block[block_name] = dict(Counter(doors))
@@ -188,7 +192,7 @@ win_area = sum(
     ) for k in all_window_keys
 )
 door_area = sum(
-    (k[1] * 10 * DOOR_H_CM * 10 / 1e6) * (
+    (k[0] * 10 * DOOR_H_CM * 10 / 1e6) * (
         door_per_block.get('RST FLOOR', {}).get(k, 0) * RST_INSERTS +
         door_per_block.get('LAST', {}).get(k, 0) * LAST_INSERTS
     ) for k in all_door_keys
@@ -306,10 +310,10 @@ for i, wk in enumerate(all_window_keys):
     ws.write(r, 6, qty, fl_i); ws.write(r, 7, round(ua, 2), fl_n2); ws.write(r, 8, round(ta, 1), fl_n1)
     r += 1; idx += 1
 
-for i, (dblock, w_cm) in enumerate(all_door_keys):
-    qty = (door_per_block.get('RST FLOOR', {}).get((dblock, w_cm), 0) * RST_INSERTS +
-           door_per_block.get('LAST', {}).get((dblock, w_cm), 0) * LAST_INSERTS)
-    dtype = DOOR_TYPES.get((dblock, w_cm), 'Hinged Door')
+for i, (w_cm, dtype) in enumerate(all_door_keys):
+    qty = (door_per_block.get('RST FLOOR', {}).get((w_cm, dtype), 0) * RST_INSERTS +
+           door_per_block.get('LAST', {}).get((w_cm, dtype), 0) * LAST_INSERTS)
+
     ua = w_cm * 10 * DOOR_H_CM * 10 / 1e6; ta = ua * qty
     fl = pick(idx, rg, rw); fl_l = pick(idx, rg_l, rw_l)
     fl_i = pick(idx, rg_i, rw_i); fl_n1 = pick(idx, rg_n1, rw_n1); fl_n2 = pick(idx, rg_n2, rw_n2)
@@ -403,11 +407,11 @@ ws3.set_row(r, 32); r += 1
 rst_door_total = sum(door_per_block.get('RST FLOOR', {}).values())
 last_door_total = sum(door_per_block.get('LAST', {}).values())
 
-for i, (dblock, w_cm) in enumerate(all_door_keys):
-    rst_pf = door_per_block.get('RST FLOOR', {}).get((dblock, w_cm), 0)
-    last_pf = door_per_block.get('LAST', {}).get((dblock, w_cm), 0)
+for i, (w_cm, dtype) in enumerate(all_door_keys):
+    rst_pf = door_per_block.get('RST FLOOR', {}).get((w_cm, dtype), 0)
+    last_pf = door_per_block.get('LAST', {}).get((w_cm, dtype), 0)
     total = rst_pf * RST_INSERTS + last_pf * LAST_INSERTS
-    dtype = DOOR_TYPES.get((dblock, w_cm), 'Hinged Door')
+
     ua = w_cm * 10 * DOOR_H_CM * 10 / 1e6; ta = ua * total
 
     fl = pick(i, rg, rw); fl_l = pick(i, rg_l, rw_l); fl_i = pick(i, rg_i, rw_i)
@@ -470,10 +474,10 @@ ws4.write(r, DC+nf, total_win, st_i); r += 1
 
 ws4.merge_range(r, 0, r, DC+nf, 'DOORS', fmt_sec_o); r += 1
 door_pf = [0] * nf
-for i, (dblock, w_cm) in enumerate(all_door_keys):
-    rst_pf = door_per_block.get('RST FLOOR', {}).get((dblock, w_cm), 0)
-    last_pf = door_per_block.get('LAST', {}).get((dblock, w_cm), 0)
-    dtype = DOOR_TYPES.get((dblock, w_cm), 'Hinged Door')
+for i, (w_cm, dtype) in enumerate(all_door_keys):
+    rst_pf = door_per_block.get('RST FLOOR', {}).get((w_cm, dtype), 0)
+    last_pf = door_per_block.get('LAST', {}).get((w_cm, dtype), 0)
+
     fl = pick(i, rg, rw); fl_l = pick(i, rg_l, rw_l); fl_i = pick(i, rg_i, rw_i)
     ws4.write(r, 0, idx, fl); ws4.write(r, 1, f'D{i+1:02d}', fl)
     ws4.write(r, 2, dtype, fl_l)
@@ -532,11 +536,11 @@ ws5.write(r, 6, total_win, st_i); ws5.write(r, 7, round(wc, 1), st_n1); r += 1
 
 ws5.merge_range(r, 0, r, 7, f'DOORS ({len(all_door_keys)} types, {total_door} units)', fmt_sec_o); r += 1
 dc = 0
-for i, (dblock, w_cm) in enumerate(all_door_keys):
-    qty = (door_per_block.get('RST FLOOR', {}).get((dblock, w_cm), 0) * RST_INSERTS +
-           door_per_block.get('LAST', {}).get((dblock, w_cm), 0) * LAST_INSERTS)
+for i, (w_cm, dtype) in enumerate(all_door_keys):
+    qty = (door_per_block.get('RST FLOOR', {}).get((w_cm, dtype), 0) * RST_INSERTS +
+           door_per_block.get('LAST', {}).get((w_cm, dtype), 0) * LAST_INSERTS)
     ua = w_cm*10*DOOR_H_CM*10/1e6; ta = round(ua*qty, 1); dc += ta
-    dtype = DOOR_TYPES.get((dblock, w_cm), 'Hinged Door')
+
     fl = pick(i, rg, rw); fl_l = pick(i, rg_l, rw_l)
     fl_n2 = pick(i, rg_n2, rw_n2); fl_n1 = pick(i, rg_n1, rw_n1); fl_i = pick(i, rg_i, rw_i)
     ws5.write(r, 0, len(all_window_keys)+i+1, fl); ws5.write(r, 1, f'D{i+1:02d}', fl)
@@ -590,10 +594,9 @@ for c in range(1, 9): ws6.write(r, c, '', st)
 ws6.write(r, 1, 'WINDOW TOTAL', st_l); ws6.write(r, 8, total_win, st_i); r += 1
 
 ws6.merge_range(r, 1, r, 8, 'DOORS', fmt_sec_o); r += 1
-for i, (dblock, w_cm) in enumerate(all_door_keys):
-    rst_pf = door_per_block.get('RST FLOOR', {}).get((dblock, w_cm), 0)
-    last_pf = door_per_block.get('LAST', {}).get((dblock, w_cm), 0)
-    dtype = DOOR_TYPES.get((dblock, w_cm), 'Door')
+for i, (w_cm, dtype) in enumerate(all_door_keys):
+    rst_pf = door_per_block.get('RST FLOOR', {}).get((w_cm, dtype), 0)
+    last_pf = door_per_block.get('LAST', {}).get((w_cm, dtype), 0)
     fl = pick(i, rg, rw); fl_l = pick(i, rg_l, rw_l); fl_i = pick(i, rg_i, rw_i)
     ws6.write(r, 1, f'{dtype} {w_cm*10}mm', fl_l); ws6.write(r, 2, 'RST FLOOR', fl_l)
     ws6.write(r, 3, rst_pf, fl); ws6.write(r, 4, '\u00d7', fl)
