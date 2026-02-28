@@ -85,8 +85,8 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Get or create tenant
-    tenant_result = await db.execute(select(Tenant).where(Tenant.name == req.tenant_name))
+    # Get or create tenant (use first match if duplicates exist)
+    tenant_result = await db.execute(select(Tenant).where(Tenant.name == req.tenant_name).limit(1))
     tenant = tenant_result.scalar_one_or_none()
     if not tenant:
         tenant = Tenant(name=req.tenant_name)
@@ -94,7 +94,7 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
         await db.flush()
 
     # Get Admin role (created by seed data)
-    role_result = await db.execute(select(Role).where(Role.name == "Admin"))
+    role_result = await db.execute(select(Role).where(Role.name == "Admin").limit(1))
     role = role_result.scalar_one_or_none()
 
     user = User(
