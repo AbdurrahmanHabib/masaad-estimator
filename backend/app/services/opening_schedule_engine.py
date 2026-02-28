@@ -254,6 +254,122 @@ class OpeningScheduleEngine:
 
             schedule.schedule.append(record)
 
+        # ── Also process DWG openings (from Turkish/enhanced extraction) ─────
+        # The DWG parser may return window/door openings directly in the
+        # "openings" key (in addition to or instead of "blocks").
+        # These have a total count across all floors. We distribute per floor.
+        dwg_openings = dwg_extraction.get("openings", [])
+
+        # Determine floor list from text annotations
+        floor_list = self._detect_floors_from_text(dwg_extraction)
+
+        for opening in dwg_openings:
+            o_type = opening.get("type", "window")
+            width = float(opening.get("width_mm", 0) or 0)
+            height = float(opening.get("height_mm", 0) or 0)
+            total_count = int(opening.get("count", 1) or 1)
+
+            if width <= 0 or height <= 0:
+                continue
+
+            # Determine system type from opening type and size
+            if o_type == "door":
+                system_type = "Door - Single Swing"
+                item_prefix = "DSS"
+            elif width >= 5000:
+                system_type = "Window - Fixed"  # Large window wall panels
+                item_prefix = "WF"
+            else:
+                system_type = "Window - Casement"
+                item_prefix = "WC"
+
+            # Calculate per-unit metrics
+            sightlines = SIGHTLINE_DEDUCTIONS.get(system_type, SIGHTLINE_DEDUCTIONS["default"])
+            net_w = max(0, width - 2 * sightlines["horizontal"])
+            net_h = max(0, height - 2 * sightlines["vertical"])
+            gross_area = (width * height) / 1_000_000 if width and height else 0
+            net_glazed = (net_w * net_h) / 1_000_000 if net_w and net_h else 0
+            gt = glass_thickness or 6.0
+            glass_weight = net_glazed * gt * GLASS_DENSITY_KG_M2_PER_MM
+            perimeter_mm = 2 * (width + height)
+            perimeter_lm = perimeter_mm / 1000.0
+            al_norm = ALUMINUM_WEIGHT_NORMS.get(system_type, ALUMINUM_WEIGHT_NORMS["default"])
+            if "Curtain Wall" in system_type or "Structural" in system_type:
+                aluminum_weight = gross_area * al_norm
+            else:
+                aluminum_weight = perimeter_lm * al_norm
+            gasket_mult = GASKET_MULTIPLIERS.get(system_type, GASKET_MULTIPLIERS["default"])
+            gasket_length = perimeter_lm * gasket_mult
+            hw_sets = HARDWARE_SETS_NORMS.get(system_type, HARDWARE_SETS_NORMS["default"])
+
+            # Distribute across floors
+            if floor_list and total_count >= len(floor_list):
+                per_floor = total_count // len(floor_list)
+                remainder = total_count % len(floor_list)
+                for fi, floor_name in enumerate(floor_list):
+                    floor_qty = per_floor + (1 if fi < remainder else 0)
+                    if floor_qty <= 0:
+                        continue
+                    elevation = "E1"
+                    key = (item_prefix, elevation, floor_name)
+                    opening_counters[key] = opening_counters.get(key, 0) + 1
+                    seq = opening_counters[key]
+                    opening_id = f"{item_prefix}-{elevation}-{floor_name}-{seq:03d}"
+
+                    record = OpeningRecord(
+                        opening_id=opening_id,
+                        system_type=system_type,
+                        width_mm=width,
+                        height_mm=height,
+                        gross_area_sqm=round(gross_area, 4),
+                        net_glazed_sqm=round(net_glazed, 4),
+                        elevation=elevation,
+                        floor=floor_name,
+                        count=floor_qty,
+                        total_gross_sqm=round(gross_area * floor_qty, 4),
+                        total_glazed_sqm=round(net_glazed * floor_qty, 4),
+                        item_code=opening_id,
+                        glass_type=glass_type_from_spec or "6mm Clear Tempered",
+                        glass_thickness_mm=gt,
+                        glass_pane_weight_kg=round(glass_weight, 2),
+                        aluminum_weight_kg=round(aluminum_weight, 2),
+                        gasket_length_lm=round(gasket_length, 2),
+                        hardware_sets=hw_sets,
+                        perimeter_lm=round(perimeter_lm, 3),
+                    )
+                    schedule.schedule.append(record)
+            else:
+                # No floor list or small count — single entry
+                floor = opening.get("floor", "") or "TYP"
+                elevation = opening.get("elevation", "") or "E1"
+                key = (item_prefix, elevation, floor)
+                opening_counters[key] = opening_counters.get(key, 0) + 1
+                seq = opening_counters[key]
+                opening_id = f"{item_prefix}-{elevation}-{floor}-{seq:03d}"
+
+                record = OpeningRecord(
+                    opening_id=opening_id,
+                    system_type=system_type,
+                    width_mm=width,
+                    height_mm=height,
+                    gross_area_sqm=round(gross_area, 4),
+                    net_glazed_sqm=round(net_glazed, 4),
+                    elevation=elevation,
+                    floor=floor,
+                    count=total_count,
+                    total_gross_sqm=round(gross_area * total_count, 4),
+                    total_glazed_sqm=round(net_glazed * total_count, 4),
+                    item_code=opening_id,
+                    glass_type=glass_type_from_spec or "6mm Clear Tempered",
+                    glass_thickness_mm=gt,
+                    glass_pane_weight_kg=round(glass_weight, 2),
+                    aluminum_weight_kg=round(aluminum_weight, 2),
+                    gasket_length_lm=round(gasket_length, 2),
+                    hardware_sets=hw_sets,
+                    perimeter_lm=round(perimeter_lm, 3),
+                )
+                schedule.schedule.append(record)
+
         # Deduplicate identical openings (same size + same system + same elevation/floor)
         schedule.schedule = self._deduplicate_openings(schedule.schedule)
 
@@ -348,6 +464,49 @@ class OpeningScheduleEngine:
 
         return rfis
 
+    def _detect_floors_from_text(self, dwg_extraction: dict) -> list[str]:
+        """Detect floor names from DWG text annotations."""
+        texts = dwg_extraction.get("text_annotations", [])
+        floors = set()
+
+        for text in texts:
+            text_upper = str(text).upper()
+            # "1,2,3,4,5,6,7,8,9TH FLOOR PLAN" → floors 1-9
+            multi_match = re.match(r'([\d,]+)\s*(ST|ND|RD|TH)\s+FLOOR', text_upper)
+            if multi_match:
+                for n in multi_match.group(1).split(','):
+                    n = n.strip()
+                    if n.isdigit():
+                        floors.add(f"{n}F")
+                continue
+
+            # "GROUND FLOOR"
+            if 'GROUND' in text_upper and 'FLOOR' in text_upper:
+                floors.add('GF')
+            # "LAST FLOOR"
+            elif 'LAST' in text_upper and 'FLOOR' in text_upper:
+                floors.add('LAST')
+            # "1ST FLOOR", "2ND FLOOR", etc.
+            else:
+                single = re.match(r'(\d+)\s*(ST|ND|RD|TH)\s+FLOOR', text_upper)
+                if single:
+                    floors.add(f"{single.group(1)}F")
+
+        if not floors:
+            return []
+
+        # Sort: GF first, then numeric, then LAST
+        def floor_sort_key(f):
+            if f == 'GF':
+                return (0, 0)
+            elif f == 'LAST':
+                return (2, 0)
+            elif f.endswith('F') and f[:-1].isdigit():
+                return (1, int(f[:-1]))
+            return (1, 999)
+
+        return sorted(floors, key=floor_sort_key)
+
     def _extract_glass_type(self, spec_text: str) -> str:
         """Extract predominant glass type from spec text."""
         if not spec_text:
@@ -429,10 +588,12 @@ class OpeningScheduleEngine:
             "schedule": [
                 {
                     "opening_id": r.opening_id,
+                    "id": r.opening_id,  # BOM engine compatibility
                     "mark_id": r.item_code,
                     "system_type": r.system_type,
                     "system_series": r.system_series,
                     "qty": r.count,
+                    "quantity": r.count,  # BOM engine compatibility
                     "width_mm": r.width_mm,
                     "height_mm": r.height_mm,
                     "gross_area_sqm": r.gross_area_sqm,

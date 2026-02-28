@@ -102,6 +102,7 @@ FACADE_TAXONOMY: dict[str, dict] = {
         "layer_patterns": [
             "a-win-c", "casement", "a-win-01", "a-win-ext",
             "side-hung", "side hung",
+            "pencere", "penc-yazi", ".pencereler",
         ],
         "spec_keywords": [
             "casement window", "side-hung", "side hung", "ge-c50", "gc-50",
@@ -114,6 +115,7 @@ FACADE_TAXONOMY: dict[str, dict] = {
     "Window - Fixed": {
         "layer_patterns": [
             "a-win-f", "fixed light", "a-win-02", "fixed-window", "picture win",
+            "kapi_pencere", "kapi-pencere", "dograma", "doğrama",
         ],
         "spec_keywords": [
             "fixed glazing", "fixed light", "non-opening", "picture window",
@@ -172,6 +174,7 @@ FACADE_TAXONOMY: dict[str, dict] = {
     "Door - Single Swing": {
         "layer_patterns": [
             "a-dr-ss", "a-dr-01", "a-dr-ext", "single-door", "swing door",
+            "kapi", "kapı", "b_kapi", "door",
         ],
         "spec_keywords": [
             "single swing door", "single leaf", "hinged door", "single-leaf",
@@ -450,6 +453,7 @@ FACADE_TAXONOMY: dict[str, dict] = {
     "Shopfront": {
         "layer_patterns": [
             "a-sf-", "shopfront", "shop-front", "retail facade",
+            "dograma-gorunus", "rol_cephe",
         ],
         "spec_keywords": [
             "shopfront", "shop front", "retail facade", "display window",

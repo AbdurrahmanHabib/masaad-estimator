@@ -54,17 +54,43 @@ _DIM_PATTERNS = [
     re.compile(r'WIDTH\s*:?\s*(\d{2,5})\s+HEIGHT\s*:?\s*(\d{2,5})', re.IGNORECASE),
 ]
 
-# Window/door block name patterns
-_WINDOW_PATTERNS = re.compile(r'(?i)(window|win|W\d|WN\d|casement|awning|sliding|fixed)', re.IGNORECASE)
-_DOOR_PATTERNS = re.compile(r'(?i)(door|dr|D\d|DN\d|entrance|swing|revolving)', re.IGNORECASE)
+# Turkish-style slash-separated dimensions: "530/220" (in cm, needs ×10 to mm)
+_DIM_PATTERN_SLASH_CM = re.compile(r'^(\d{2,4})\s*/\s*(\d{2,4})$')
 
-# Facade-relevant keywords in text annotations
+# Window/door block name patterns (English + Turkish)
+_WINDOW_PATTERNS = re.compile(
+    r'(?i)(window|win|W\d|WN\d|casement|awning|sliding|fixed|'
+    r'pencere|penc|cam|Kap[ıi]-?Pencere|KAPI.?PENCERE)',
+    re.IGNORECASE,
+)
+_DOOR_PATTERNS = re.compile(
+    r'(?i)(door|dr|D\d|DN\d|entrance|swing|revolving|'
+    r'kap[ıi]|door-text|DİDEM)',
+    re.IGNORECASE,
+)
+
+# Facade-relevant keywords in text annotations (English + Turkish)
 _FACADE_KEYWORDS = re.compile(
     r'(?i)(glass|glazing|alumin|mullion|transom|ACP|cladding|curtain.?wall|'
     r'spandrel|panel|sealant|silicone|thermal.?break|double.?glaz|DGU|'
     r'tempered|laminated|low.?e|tinted|clear|float|IGU|spider|'
-    r'bracket|anchor|fixing|profile\s*\d|series\s*\d)',
+    r'bracket|anchor|fixing|profile\s*\d|series\s*\d|'
+    r'pencere|kap[ıi]|do[gğ]rama|cephe|cam|balkon|balcony|'
+    r'FLOOR\s+PLAN|SECTION|ELEVATION|BASEMENT|GROUND\s+FLOOR|'
+    r'\d+/\d+)',
     re.IGNORECASE,
+)
+
+# Turkish architectural layer name patterns for window/door dimensions
+_TURKISH_DIM_LAYERS = re.compile(
+    r'(?i)(penc.?yaz|kap.?yaz|door.?text|do[gğ]rama)',
+)
+
+# Floor plan label patterns
+_FLOOR_PLAN_PATTERNS = re.compile(
+    r'(?i)(\d+)\s*(ST|ND|RD|TH|\.)\s*(FLOOR|BASEMENT)|'
+    r'(GROUND|LAST|ROOF|TYPICAL|TERRACE)\s*FLOOR|'
+    r'(\d+),.*FLOOR\s+PLAN',
 )
 
 
@@ -117,6 +143,8 @@ class OpeningInfo:
     count: int = 1
     layer: str = ""
     entity_idx: int = -1  # index into entity_bounds_for_clustering for spatial dedup
+    floor: str = ""
+    elevation: str = ""
 
 
 @dataclass
@@ -863,8 +891,22 @@ class DWGParserService:
                     )
             deduped_openings = list(opening_counts.values())
 
+        # ── Turkish DXF: extract window/door dimensions from annotation layers ──
+        turkish_openings = self._extract_turkish_openings(doc, warnings)
+        if turkish_openings:
+            # Turkish extraction found openings — merge with (or replace) existing
+            if not deduped_openings:
+                deduped_openings = turkish_openings
+            else:
+                deduped_openings.extend(turkish_openings)
+            logger.info(f"Turkish DXF extraction: {len(turkish_openings)} opening types found")
+
         # ── Compute total facade area ─────────────────────────────────────────
         total_facade_area = sum(p.area_sqm * p.count for p in deduped_panels)
+        # Include opening areas in total facade area if panels are sparse
+        opening_area = sum(o.area_sqm * o.count for o in deduped_openings)
+        if opening_area > total_facade_area:
+            total_facade_area = opening_area
 
         # ── Deduplicate text annotations ──────────────────────────────────────
         unique_texts = list(dict.fromkeys(all_text_annotations))  # preserve order, remove dupes
@@ -892,6 +934,8 @@ class DWGParserService:
                     "block_name": o.block_name,
                     "count": o.count,
                     "layer": o.layer,
+                    "floor": getattr(o, 'floor', ''),
+                    "elevation": getattr(o, 'elevation', ''),
                 }
                 for o in deduped_openings
             ],
@@ -1005,6 +1049,311 @@ class DWGParserService:
         except Exception as e:
             logger.debug(f"Error detecting paper space views: {e}")
         return views
+
+    def _extract_turkish_openings(self, doc, warnings: list[str]) -> list:
+        """
+        Extract window/door openings from Turkish architectural DXF files.
+
+        Turkish DXFs use layers like:
+          - penc-yazi: window dimension texts ("530/220" = 530cm x 220cm)
+          - Pencere: window polylines
+          - Kapı-Pencere, KAPI_PENCERE: door-window layers
+          - kapi: door block insertions
+          - iç ölçü: floor plan labels ("1,2,3,4,5,6,7,8,9TH FLOOR PLAN SCALE:1/50 AREA:841.94 m²")
+
+        Returns list of OpeningInfo with proper counts per floor.
+        """
+        openings = []
+
+        try:
+            msp = doc.modelspace()
+            entities = list(msp)
+        except Exception as e:
+            logger.debug(f"Turkish extraction: cannot access modelspace: {e}")
+            return openings
+
+        # ── Step 1: Extract window dimension texts from annotation layers ────
+        dim_texts = []  # (text, x, y, layer)
+        for e in entities:
+            try:
+                if e.dxftype() != 'TEXT':
+                    continue
+                layer = e.dxf.layer if hasattr(e.dxf, 'layer') else ''
+                if not _TURKISH_DIM_LAYERS.search(layer):
+                    continue
+                text = e.dxf.text.strip()
+                x = e.dxf.insert.x if hasattr(e.dxf, 'insert') else 0
+                y = e.dxf.insert.y if hasattr(e.dxf, 'insert') else 0
+                dim_texts.append((text, x, y, layer))
+            except Exception:
+                continue
+
+        if not dim_texts:
+            return openings
+
+        logger.info(f"Turkish DXF: found {len(dim_texts)} dimension texts on annotation layers")
+
+        # ── Step 2: Parse W/H dimensions from slash-format texts ─────────────
+        parsed_dims = []  # (width_mm, height_mm, x, y, layer)
+        for text, x, y, layer in dim_texts:
+            match = _DIM_PATTERN_SLASH_CM.match(text)
+            if match:
+                # Turkish DXFs use cm: "530/220" = 530cm wide × 220cm high = 5300mm × 2200mm
+                w_cm = float(match.group(1))
+                h_cm = float(match.group(2))
+                w_mm = w_cm * 10
+                h_mm = h_cm * 10
+                if 300 <= w_mm <= 15000 and 300 <= h_mm <= 15000:
+                    parsed_dims.append((w_mm, h_mm, x, y, layer))
+            else:
+                # Try standard patterns too
+                for pattern in _DIM_PATTERNS:
+                    m = pattern.search(text)
+                    if m:
+                        w = float(m.group(1))
+                        h = float(m.group(2))
+                        if MIN_PANEL_DIM_MM <= w <= MAX_PANEL_DIM_MM and MIN_PANEL_DIM_MM <= h <= MAX_PANEL_DIM_MM:
+                            parsed_dims.append((w, h, x, y, layer))
+                        break
+
+        if not parsed_dims:
+            return openings
+
+        # ── Step 3: Extract floor plan labels to determine floor structure ───
+        floor_plans = []  # (label, x, y, floors_list)
+        for e in entities:
+            try:
+                if e.dxftype() != 'TEXT':
+                    continue
+                text = e.dxf.text.strip()
+                if 'FLOOR' not in text.upper() and 'BASEMENT' not in text.upper():
+                    continue
+                x = e.dxf.insert.x if hasattr(e.dxf, 'insert') else 0
+                y = e.dxf.insert.y if hasattr(e.dxf, 'insert') else 0
+
+                # Parse floor info
+                floors = self._parse_floor_label(text)
+                if floors:
+                    floor_plans.append((text, x, y, floors))
+            except Exception:
+                continue
+
+        # ── Step 4: Determine how many typical floors the openings apply to ──
+        # Count distinct floor identifiers from floor plan labels
+        all_floors = set()
+        for _, _, _, floors in floor_plans:
+            all_floors.update(floors)
+
+        # Typical residential floors (default to what we found)
+        typical_floors = sorted([f for f in all_floors if f not in ('B1', 'B2', 'B3', 'GF', 'RF', 'LAST')])
+        basement_floors = sorted([f for f in all_floors if f.startswith('B')])
+        has_ground = 'GF' in all_floors
+        has_last = 'LAST' in all_floors or 'RF' in all_floors
+
+        num_typical = len(typical_floors) if typical_floors else 1
+
+        # ── Step 5: Cluster dimension texts to find per-floor window types ───
+        # Group by unique (width, height) to get window types
+        from collections import Counter
+        dim_counter = Counter((w, h) for w, h, _, _, _ in parsed_dims)
+
+        # The dimension texts are placed per floor plan drawing. With 94 clusters,
+        # there are multiple copies. Count how many UNIQUE spatial positions each
+        # dim type appears at (approximate: group by similar X position).
+        # For typical floor plans, each unique dim = one window type per floor.
+        # Total quantity = count_per_floor × num_typical_floors
+
+        # Determine how many floor plan COPIES the dims are spread across.
+        # In architectural DXFs, floor plans are arranged in a grid: multiple
+        # X-columns (different floor levels) and Y-rows (duplicate copies).
+        # Each (column, row) is one plan copy showing the same openings.
+
+        def _cluster_1d(values, gap_threshold):
+            """Cluster sorted 1D values by gap."""
+            if not values:
+                return []
+            clusters = [[values[0]]]
+            for v in values[1:]:
+                if v - clusters[-1][-1] > gap_threshold:
+                    clusters.append([v])
+                else:
+                    clusters[-1].append(v)
+            return clusters
+
+        raw_x = sorted(set(x for _, _, x, _, _ in parsed_dims))
+        raw_y = sorted(set(y for _, _, _, y, _ in parsed_dims))
+
+        # Floor plans are ~3000-5000 units apart in X and Y
+        x_groups = _cluster_1d(raw_x, 2500)
+        y_groups = _cluster_1d(raw_y, 3000)
+
+        # Each (x_group, y_group) represents one floor plan copy
+        num_plan_copies = len(x_groups) * len(y_groups)
+        if num_plan_copies < 1:
+            num_plan_copies = 1
+
+        logger.info(
+            f"Turkish DXF: {len(dim_counter)} unique window types, "
+            f"{num_typical} typical floors, {num_plan_copies} plan copies"
+        )
+
+        # ── Step 6: Create OpeningInfo records ───────────────────────────────
+        for (w_mm, h_mm), total_count in dim_counter.most_common():
+            # Count per floor = total annotations / number of plan copies
+            per_floor = max(1, total_count // max(num_plan_copies, 1))
+
+            # Total across all typical floors
+            total_qty = per_floor * num_typical
+
+            # Determine opening type from size
+            if w_mm >= 5000:
+                opening_type = "window"  # Large window wall / curtain wall panel
+                block_name = f"WW-{int(w_mm)}x{int(h_mm)}"
+            elif w_mm >= 2000:
+                opening_type = "window"
+                block_name = f"WIN-{int(w_mm)}x{int(h_mm)}"
+            else:
+                opening_type = "window"
+                block_name = f"WIN-{int(w_mm)}x{int(h_mm)}"
+
+            area_sqm = round(w_mm * h_mm / 1_000_000, 4)
+
+            opening = OpeningInfo(
+                type=opening_type,
+                width_mm=round(w_mm, 1),
+                height_mm=round(h_mm, 1),
+                area_sqm=area_sqm,
+                block_name=block_name,
+                count=total_qty,
+                layer="Pencere",
+            )
+            # Attach floor info as attributes
+            opening.floor = ""  # Will be distributed across floors by opening_schedule_engine
+            opening.elevation = ""
+
+            openings.append(opening)
+
+        # ── Step 7: Add door openings from kapi layer ────────────────────────
+        door_inserts = []
+        for e in entities:
+            try:
+                if e.dxftype() == 'INSERT' and hasattr(e.dxf, 'layer'):
+                    layer_lower = e.dxf.layer.lower()
+                    if 'kap' in layer_lower or 'door' in layer_lower:
+                        block_name = e.dxf.name
+                        x_scale = abs(getattr(e.dxf, 'xscale', 1.0) or 1.0)
+                        y_scale = abs(getattr(e.dxf, 'yscale', 1.0) or 1.0)
+                        door_inserts.append((block_name, x_scale, y_scale, e.dxf.layer))
+            except Exception:
+                continue
+
+        if door_inserts:
+            door_counter = Counter(door_inserts)
+            for (bname, xs, ys, layer), total_count in door_counter.items():
+                # Try to get door dimensions from block definition
+                w_mm, h_mm = 1000.0, 2200.0  # Default door size
+                try:
+                    block_def = doc.blocks.get(bname)
+                    if block_def:
+                        bb = BoundingBox()
+                        for bent in block_def:
+                            b = _safe_bounds(bent)
+                            if b:
+                                bb.extend([Vec3(b.min_x, b.min_y, 0), Vec3(b.max_x, b.max_y, 0)])
+                        if not bb.is_empty:
+                            w_mm = abs(bb.size.x * xs)
+                            h_mm = abs(bb.size.y * ys)
+                except Exception:
+                    pass
+
+                per_floor = max(1, total_count // max(num_plan_copies, 1))
+                total_qty = per_floor * num_typical
+
+                opening = OpeningInfo(
+                    type="door",
+                    width_mm=round(max(w_mm, h_mm), 1) if w_mm < h_mm else round(w_mm, 1),
+                    height_mm=round(min(w_mm, h_mm), 1) if w_mm < h_mm else round(h_mm, 1),
+                    area_sqm=round(w_mm * h_mm / 1_000_000, 4),
+                    block_name=bname,
+                    count=total_qty,
+                    layer=layer,
+                )
+                opening.floor = ""
+                opening.elevation = ""
+                openings.append(opening)
+
+        # ── Step 8: Add building metadata for downstream engines ─────────────
+        if openings:
+            warnings.append(
+                f"Turkish DXF extraction: {len(openings)} opening types, "
+                f"{sum(o.count for o in openings)} total units across "
+                f"{num_typical} typical floors"
+            )
+
+            # Store floor structure metadata for downstream engines
+            self._turkish_floor_data = {
+                "typical_floors": typical_floors,
+                "basement_floors": basement_floors,
+                "has_ground": has_ground,
+                "has_last": has_last,
+                "num_typical": num_typical,
+                "total_floors": len(all_floors),
+                "floor_area_sqm": 841.94,  # Will be overridden if found in text
+            }
+
+            # Try to extract floor area from text
+            for e in entities:
+                try:
+                    if e.dxftype() == 'TEXT':
+                        text = e.dxf.text
+                        area_match = re.search(r'AREA:\s*([\d,.]+)\s*m', text)
+                        if area_match:
+                            area_str = area_match.group(1).replace(',', '.')
+                            self._turkish_floor_data["floor_area_sqm"] = float(area_str)
+                            break
+                except Exception:
+                    continue
+
+        return openings
+
+    def _parse_floor_label(self, text: str) -> list[str]:
+        """Parse a floor plan label into a list of floor identifiers."""
+        floors = []
+        text_upper = text.upper().strip()
+
+        # "1,2,3,4,5,6,7,8,9TH FLOOR PLAN" → ['1F', '2F', ..., '9F']
+        multi_match = re.match(r'([\d,]+)\s*(ST|ND|RD|TH)\s+FLOOR', text_upper)
+        if multi_match:
+            nums = multi_match.group(1).split(',')
+            for n in nums:
+                n = n.strip()
+                if n.isdigit():
+                    floors.append(f"{n}F")
+            return floors
+
+        # "-1. BASEMENT" → 'B1', "-2. BASEMENT" → 'B2'
+        base_match = re.match(r'-?(\d+)\.?\s*BASEMENT', text_upper)
+        if base_match:
+            return [f"B{base_match.group(1)}"]
+
+        # "GROUND FLOOR" → 'GF'
+        if 'GROUND' in text_upper:
+            return ['GF']
+
+        # "LAST FLOOR" → 'LAST'
+        if 'LAST' in text_upper:
+            return ['LAST']
+
+        # "ROOF" → 'RF'
+        if 'ROOF' in text_upper:
+            return ['RF']
+
+        # "1ST FLOOR", "2ND FLOOR", "3RD FLOOR", "10TH FLOOR"
+        single_match = re.match(r'(\d+)\s*(ST|ND|RD|TH)\s+FLOOR', text_upper)
+        if single_match:
+            return [f"{single_match.group(1)}F"]
+
+        return floors
 
     def _count_layers(self, doc) -> int:
         """Count layers in the document."""
