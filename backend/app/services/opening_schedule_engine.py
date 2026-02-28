@@ -129,6 +129,346 @@ FACADE_DISTRIBUTION = {
 }
 
 
+# ── Panel Subdivision Engine ──────────────────────────────────────────────────
+# Breaks each opening into individual panels (Fixed/Sliding) based on system rules.
+# Calculates real glass pane sizes, weights, and profile cut lengths per panel.
+
+# Panel subdivision rules per Glazetech system
+# Configuration notation: F = Fixed, S = Sliding, e.g. "F-S-S" = 1 fixed + 2 sliding
+PANEL_SUBDIVISION_RULES = {
+    "Window - Sliding (Lift & Slide TB)": {
+        # Lift & Slide: max sash width 3200mm. For wide openings, use multi-panel.
+        "max_sash_width_mm": 3200,
+        "configurations": [
+            # (max_opening_width, config, description)
+            (4000, "S-S", "2-panel: both sliding"),
+            (6500, "F-S-S", "3-panel: 1 fixed + 2 sliding"),
+            (9000, "F-S-S-F", "4-panel: 2 fixed + 2 sliding"),
+            (12000, "F-S-S-S-F", "5-panel: 2 fixed + 3 sliding"),
+        ],
+        "interlock_width_mm": 30,  # overlap between sliding panels
+        "frame_deduction_mm": {    # deduct from opening for frame profiles
+            "left": 55, "right": 55, "top": 50, "bottom": 60,
+        },
+        "sash_deduction_mm": {     # deduct from panel for sash profiles
+            "left": 25, "right": 25, "top": 22, "bottom": 30,
+        },
+        "glazing_bead_mm": 18,    # glazing bead on each side of glass
+    },
+    "Window - Sliding": {
+        # Slim Sliding: max sash width 2500mm
+        "max_sash_width_mm": 2500,
+        "configurations": [
+            (3000, "S-S", "2-panel: both sliding"),
+            (5500, "S-S-S", "3-panel: 3 sliding"),
+            (8000, "F-S-S-F", "4-panel: 2 fixed + 2 sliding"),
+        ],
+        "interlock_width_mm": 22,
+        "frame_deduction_mm": {
+            "left": 40, "right": 40, "top": 40, "bottom": 45,
+        },
+        "sash_deduction_mm": {
+            "left": 20, "right": 20, "top": 18, "bottom": 22,
+        },
+        "glazing_bead_mm": 15,
+    },
+    "Window - Sliding (Eco 500 TB)": {
+        # Eco 500: max sash width 2000mm
+        "max_sash_width_mm": 2000,
+        "configurations": [
+            (2500, "S-S", "2-panel: both sliding"),
+            (4500, "S-S-S", "3-panel: 3 sliding"),
+            (6000, "F-S-S-F", "4-panel: 2 fixed + 2 sliding"),
+        ],
+        "interlock_width_mm": 25,
+        "frame_deduction_mm": {
+            "left": 40, "right": 40, "top": 40, "bottom": 45,
+        },
+        "sash_deduction_mm": {
+            "left": 22, "right": 22, "top": 20, "bottom": 25,
+        },
+        "glazing_bead_mm": 16,
+    },
+    "Door - Sliding": {
+        # Same as Lift & Slide TB but for doors
+        "max_sash_width_mm": 3200,
+        "configurations": [
+            (2500, "S", "1-panel: single sliding door leaf"),
+            (4000, "S-S", "2-panel: both sliding"),
+            (6500, "F-S-S", "3-panel: 1 fixed + 2 sliding"),
+        ],
+        "interlock_width_mm": 30,
+        "frame_deduction_mm": {
+            "left": 55, "right": 55, "top": 50, "bottom": 60,
+        },
+        "sash_deduction_mm": {
+            "left": 25, "right": 25, "top": 22, "bottom": 30,
+        },
+        "glazing_bead_mm": 18,
+    },
+}
+
+
+@dataclass
+class PanelDetail:
+    """Individual panel within a multi-panel opening."""
+    panel_id: str          # e.g. "LSTB-FRONT-GF-001-P1"
+    panel_type: str        # "F" (Fixed) or "S" (Sliding)
+    panel_index: int       # 0-based index within opening
+    panel_width_mm: float  # outer panel dimension
+    panel_height_mm: float
+    glass_width_mm: float  # actual glass pane size (after sash + bead deductions)
+    glass_height_mm: float
+    glass_area_sqm: float
+    glass_weight_kg: float
+    panel_area_sqm: float
+    # Profile cut lengths for this panel
+    frame_top_mm: float = 0.0     # only for fixed panels or end-of-track
+    frame_bottom_mm: float = 0.0
+    frame_left_mm: float = 0.0
+    frame_right_mm: float = 0.0
+    sash_top_mm: float = 0.0      # only for sliding panels
+    sash_bottom_mm: float = 0.0
+    sash_left_mm: float = 0.0
+    sash_right_mm: float = 0.0
+    interlock_mm: float = 0.0     # interlock/meeting stile length
+    track_length_mm: float = 0.0  # bottom track length (shared across opening)
+    requires_mechanical_handling: bool = False
+
+
+@dataclass
+class SubdividedOpening:
+    """An opening with its panel breakdown."""
+    opening_id: str
+    system_type: str
+    system_series: str
+    configuration: str         # e.g. "F-S-S"
+    config_description: str    # e.g. "3-panel: 1 fixed + 2 sliding"
+    opening_width_mm: float
+    opening_height_mm: float
+    num_panels: int
+    num_fixed: int
+    num_sliding: int
+    panels: list               # list of PanelDetail
+    total_glass_area_sqm: float
+    total_glass_weight_kg: float
+    max_pane_weight_kg: float
+    max_pane_area_sqm: float
+    track_length_mm: float
+    # Aggregate profile lengths
+    total_frame_length_mm: float
+    total_sash_length_mm: float
+    total_interlock_length_mm: float
+    # Per-opening hardware
+    hardware_sets: int
+    roller_sets: int
+
+
+def subdivide_opening(
+    opening_width_mm: float,
+    opening_height_mm: float,
+    system_type: str,
+    system_series: str,
+    opening_id: str,
+    glass_type: str = "",
+    glass_thickness_mm: float = 6.0,
+) -> SubdividedOpening:
+    """
+    Subdivide a single opening into individual panels based on Glazetech system rules.
+
+    Returns a SubdividedOpening with full panel breakdown including:
+    - Individual glass pane sizes and weights
+    - Profile cut lengths per panel
+    - Track length
+    - Hardware count
+    """
+    rules = PANEL_SUBDIVISION_RULES.get(system_type)
+
+    if not rules:
+        # Fallback: treat as single panel (casement, fixed, etc.)
+        glass_area = (opening_width_mm * opening_height_mm) / 1_000_000
+        glass_weight = glass_area * glass_thickness_mm * GLASS_DENSITY_KG_M2_PER_MM
+        panel = PanelDetail(
+            panel_id=f"{opening_id}-P1",
+            panel_type="F",
+            panel_index=0,
+            panel_width_mm=opening_width_mm,
+            panel_height_mm=opening_height_mm,
+            glass_width_mm=opening_width_mm - 70,  # generic deduction
+            glass_height_mm=opening_height_mm - 70,
+            glass_area_sqm=round(glass_area, 4),
+            glass_weight_kg=round(glass_weight, 2),
+            panel_area_sqm=round(glass_area, 4),
+            requires_mechanical_handling=glass_weight > 80,
+        )
+        return SubdividedOpening(
+            opening_id=opening_id,
+            system_type=system_type,
+            system_series=system_series,
+            configuration="F",
+            config_description="1-panel: single fixed",
+            opening_width_mm=opening_width_mm,
+            opening_height_mm=opening_height_mm,
+            num_panels=1,
+            num_fixed=1,
+            num_sliding=0,
+            panels=[panel],
+            total_glass_area_sqm=panel.glass_area_sqm,
+            total_glass_weight_kg=panel.glass_weight_kg,
+            max_pane_weight_kg=panel.glass_weight_kg,
+            max_pane_area_sqm=panel.glass_area_sqm,
+            track_length_mm=0,
+            total_frame_length_mm=2 * (opening_width_mm + opening_height_mm),
+            total_sash_length_mm=0,
+            total_interlock_length_mm=0,
+            hardware_sets=0,
+            roller_sets=0,
+        )
+
+    # Select configuration based on opening width
+    config = "S-S"
+    config_desc = "2-panel: default"
+    for max_w, cfg, desc in rules["configurations"]:
+        if opening_width_mm <= max_w:
+            config = cfg
+            config_desc = desc
+            break
+    else:
+        # Opening wider than all configs — use the largest
+        _, config, config_desc = rules["configurations"][-1]
+
+    panel_types = config.split("-")
+    num_panels = len(panel_types)
+    num_fixed = sum(1 for p in panel_types if p == "F")
+    num_sliding = sum(1 for p in panel_types if p == "S")
+
+    frame_ded = rules["frame_deduction_mm"]
+    sash_ded = rules["sash_deduction_mm"]
+    bead = rules["glazing_bead_mm"]
+    interlock_w = rules["interlock_width_mm"]
+
+    # Calculate clear width inside frame
+    clear_width = opening_width_mm - frame_ded["left"] - frame_ded["right"]
+    clear_height = opening_height_mm - frame_ded["top"] - frame_ded["bottom"]
+
+    # Total interlock width between panels
+    num_interlocks = num_panels - 1
+    total_interlock = num_interlocks * interlock_w
+
+    # Available width for panels (after interlocks)
+    available_width = clear_width - total_interlock
+
+    # Distribute width equally across panels
+    panel_width = available_width / num_panels
+
+    # Build individual panels
+    panels = []
+    total_glass_area = 0
+    total_glass_weight = 0
+    max_pane_weight = 0
+    max_pane_area = 0
+    total_frame_len = 0
+    total_sash_len = 0
+    total_interlock_len = 0
+
+    for i, ptype in enumerate(panel_types):
+        pid = f"{opening_id}-P{i + 1}"
+
+        if ptype == "F":
+            # Fixed panel: glass sits directly in frame with glazing bead
+            gw = panel_width - 2 * bead
+            gh = clear_height - 2 * bead
+            # Frame profiles for this panel
+            fl = frame_ded["left"] if i == 0 else interlock_w / 2
+            fr = frame_ded["right"] if i == num_panels - 1 else interlock_w / 2
+            frame_top = panel_width + fl + fr
+            frame_bottom = frame_top
+            frame_left = clear_height
+            frame_right = clear_height
+            total_frame_len += 2 * (frame_top + frame_left)
+            sash_top = sash_bottom = sash_left = sash_right = 0
+        else:
+            # Sliding panel: glass sits in sash frame
+            gw = panel_width - 2 * sash_ded["left"] - 2 * bead
+            gh = clear_height - sash_ded["top"] - sash_ded["bottom"] - 2 * bead
+            sash_top = panel_width
+            sash_bottom = panel_width
+            sash_left = clear_height - sash_ded["top"] - sash_ded["bottom"]
+            sash_right = sash_left
+            total_sash_len += 2 * (sash_top + sash_left)
+            frame_top = frame_bottom = frame_left = frame_right = 0
+
+        gw = max(gw, 0)
+        gh = max(gh, 0)
+        g_area = round(gw * gh / 1_000_000, 4)
+        g_weight = round(g_area * glass_thickness_mm * GLASS_DENSITY_KG_M2_PER_MM, 2)
+
+        total_glass_area += g_area
+        total_glass_weight += g_weight
+        max_pane_weight = max(max_pane_weight, g_weight)
+        max_pane_area = max(max_pane_area, g_area)
+
+        # Interlock between panels
+        il = clear_height if i < num_panels - 1 else 0
+        total_interlock_len += il
+
+        panel = PanelDetail(
+            panel_id=pid,
+            panel_type=ptype,
+            panel_index=i,
+            panel_width_mm=round(panel_width, 1),
+            panel_height_mm=round(clear_height, 1),
+            glass_width_mm=round(gw, 1),
+            glass_height_mm=round(gh, 1),
+            glass_area_sqm=g_area,
+            glass_weight_kg=g_weight,
+            panel_area_sqm=round(panel_width * clear_height / 1_000_000, 4),
+            frame_top_mm=round(frame_top, 1),
+            frame_bottom_mm=round(frame_bottom, 1),
+            frame_left_mm=round(frame_left, 1),
+            frame_right_mm=round(frame_right, 1),
+            sash_top_mm=round(sash_top, 1),
+            sash_bottom_mm=round(sash_bottom, 1),
+            sash_left_mm=round(sash_left, 1),
+            sash_right_mm=round(sash_right, 1),
+            interlock_mm=round(il, 1),
+            track_length_mm=0,  # set at opening level
+            requires_mechanical_handling=g_weight > 80,
+        )
+        panels.append(panel)
+
+    # Track runs the full opening width (shared)
+    track_length = opening_width_mm
+
+    # Outer frame perimeter
+    outer_frame = 2 * (opening_width_mm + opening_height_mm)
+    total_frame_len += outer_frame
+
+    return SubdividedOpening(
+        opening_id=opening_id,
+        system_type=system_type,
+        system_series=system_series,
+        configuration=config,
+        config_description=config_desc,
+        opening_width_mm=opening_width_mm,
+        opening_height_mm=opening_height_mm,
+        num_panels=num_panels,
+        num_fixed=num_fixed,
+        num_sliding=num_sliding,
+        panels=panels,
+        total_glass_area_sqm=round(total_glass_area, 4),
+        total_glass_weight_kg=round(total_glass_weight, 2),
+        max_pane_weight_kg=round(max_pane_weight, 2),
+        max_pane_area_sqm=round(max_pane_area, 4),
+        track_length_mm=round(track_length, 1),
+        total_frame_length_mm=round(total_frame_len, 1),
+        total_sash_length_mm=round(total_sash_len, 1),
+        total_interlock_length_mm=round(total_interlock_len, 1),
+        hardware_sets=num_sliding,  # 1 hardware set per sliding panel
+        roller_sets=num_sliding,    # 1 roller set per sliding panel
+    )
+
+
 @dataclass
 class OpeningRecord:
     opening_id: str
@@ -154,6 +494,8 @@ class OpeningRecord:
     hardware_sets: int = 0
     perimeter_lm: float = 0.0
     remarks: str = ""
+    # Panel subdivision
+    subdivision: Optional[SubdividedOpening] = None
 
 
 @dataclass
@@ -474,6 +816,26 @@ class OpeningScheduleEngine:
         # Deduplicate identical openings (same size + same system + same elevation/floor)
         schedule.schedule = self._deduplicate_openings(schedule.schedule)
 
+        # ── Panel subdivision: compute per-pane glass sizes and weights ────────
+        for rec in schedule.schedule:
+            sub = subdivide_opening(
+                opening_width_mm=rec.width_mm,
+                opening_height_mm=rec.height_mm,
+                system_type=rec.system_type,
+                system_series=rec.system_series,
+                opening_id=rec.opening_id,
+                glass_type=rec.glass_type,
+                glass_thickness_mm=rec.glass_thickness_mm,
+            )
+            rec.subdivision = sub
+            # Update glass weight to use real per-pane max (not whole opening)
+            rec.glass_pane_weight_kg = sub.max_pane_weight_kg
+            # Update net glazed area to sum of actual pane areas
+            rec.net_glazed_sqm = sub.total_glass_area_sqm
+            rec.total_glazed_sqm = round(sub.total_glass_area_sqm * rec.count, 4)
+            # Update hardware sets from subdivision (per sliding panel)
+            rec.hardware_sets = sub.hardware_sets
+
         # Build summaries
         for rec in schedule.schedule:
             schedule.total_openings += rec.count
@@ -521,7 +883,7 @@ class OpeningScheduleEngine:
         return list(groups.values())
 
     def _generate_opening_rfis(self, records: list, rfi_counter: list) -> list:
-        """Generate RFIs for unusual opening conditions."""
+        """Generate RFIs for unusual opening conditions using per-pane subdivision data."""
         rfis = []
 
         def next_rfi():
@@ -529,27 +891,54 @@ class OpeningScheduleEngine:
             return f"RFI-{rfi_counter[0]:03d}"
 
         for rec in records:
-            # Very large single pane
-            if rec.net_glazed_sqm > 4.0:
+            sub = rec.subdivision
+
+            if sub:
+                max_pane_area = sub.max_pane_area_sqm
+                max_pane_weight = sub.max_pane_weight_kg
+                config = sub.configuration
+                num_panels = sub.num_panels
+            else:
+                max_pane_area = rec.net_glazed_sqm
+                max_pane_weight = rec.glass_pane_weight_kg
+                config = "?"
+                num_panels = 1
+
+            # Large individual pane (after subdivision)
+            if max_pane_area > 4.0:
                 rfis.append({
                     "rfi_id": next_rfi(),
                     "category": "SPECIFICATION",
                     "severity": "MEDIUM",
-                    "description": f"Opening {rec.opening_id}: Large pane {rec.net_glazed_sqm:.1f} SQM — confirm glass thickness and handling method",
+                    "description": (
+                        f"Opening {rec.opening_id} ({config}, {num_panels}-panel): "
+                        f"Largest pane {max_pane_area:.2f} SQM — confirm glass thickness and handling"
+                    ),
                     "affected_element": rec.opening_id,
                     "recommendation": "Verify glass specification. Consider 8mm or 10mm for panes >4 SQM.",
                 })
 
-            # Heavy glass
-            if rec.glass_pane_weight_kg > 100:
-                severity = "HIGH" if rec.glass_pane_weight_kg > 150 else "MEDIUM"
+            # Heavy individual pane (after subdivision)
+            if max_pane_weight > 80:
+                if max_pane_weight > 150:
+                    severity = "HIGH"
+                    handling = "Crane or vacuum lifter mandatory"
+                elif max_pane_weight > 100:
+                    severity = "MEDIUM"
+                    handling = "Vacuum lifter recommended"
+                else:
+                    severity = "LOW"
+                    handling = "Two-person manual handling or vacuum lifter"
                 rfis.append({
                     "rfi_id": next_rfi(),
-                    "category": "SPECIFICATION",
+                    "category": "HANDLING",
                     "severity": severity,
-                    "description": f"Opening {rec.opening_id}: Glass weight {rec.glass_pane_weight_kg:.0f} kg — mechanical handling required",
+                    "description": (
+                        f"Opening {rec.opening_id} ({config}, {num_panels}-panel): "
+                        f"Heaviest pane {max_pane_weight:.1f} kg — {handling}"
+                    ),
                     "affected_element": rec.opening_id,
-                    "recommendation": "Crane or vacuum lifter required. Include mechanical handling in prelims.",
+                    "recommendation": f"{handling}. Include in prelims. Floor: {rec.floor}, Facade: {rec.elevation}.",
                 })
 
             # Very narrow opening
@@ -561,6 +950,46 @@ class OpeningScheduleEngine:
                     "description": f"Opening {rec.opening_id}: Width {rec.width_mm:.0f}mm — very narrow, verify with drawings",
                     "affected_element": rec.opening_id,
                     "recommendation": "Confirm opening dimensions — may be a DWG scaling issue.",
+                })
+
+            # Sash width exceeds system maximum
+            if sub and sub.panels:
+                for panel in sub.panels:
+                    if panel.panel_type == "S":
+                        rules = PANEL_SUBDIVISION_RULES.get(rec.system_type)
+                        if rules and panel.panel_width_mm > rules["max_sash_width_mm"]:
+                            rfis.append({
+                                "rfi_id": next_rfi(),
+                                "category": "ENGINEERING",
+                                "severity": "HIGH",
+                                "description": (
+                                    f"Opening {rec.opening_id} panel {panel.panel_id}: "
+                                    f"Sash width {panel.panel_width_mm:.0f}mm exceeds "
+                                    f"{rec.system_type} max {rules['max_sash_width_mm']}mm"
+                                ),
+                                "affected_element": panel.panel_id,
+                                "recommendation": (
+                                    f"Increase panel count or use a heavier system. "
+                                    f"Current config: {sub.configuration}"
+                                ),
+                            })
+                        break  # Only flag once per opening
+
+            # High-rise handling premium (floor > 8F)
+            floor_num = 0
+            if rec.floor and rec.floor[:-1].isdigit():
+                floor_num = int(rec.floor[:-1])
+            if floor_num >= 8 and max_pane_weight > 60:
+                rfis.append({
+                    "rfi_id": next_rfi(),
+                    "category": "LOGISTICS",
+                    "severity": "MEDIUM",
+                    "description": (
+                        f"Opening {rec.opening_id}: Floor {rec.floor} ({floor_num}F) — "
+                        f"pane weight {max_pane_weight:.1f}kg at height requires crane/hoist"
+                    ),
+                    "affected_element": rec.opening_id,
+                    "recommendation": "Include tower crane or material hoist in prelims for high-floor glazing.",
                 })
 
         return rfis
@@ -683,7 +1112,60 @@ class OpeningScheduleEngine:
         total_al_weight = sum(r.aluminum_weight_kg * r.count for r in schedule.schedule)
         total_gasket = sum(r.gasket_length_lm * r.count for r in schedule.schedule)
         total_hw_sets = sum(r.hardware_sets * r.count for r in schedule.schedule)
-        total_glass_weight = sum(r.glass_pane_weight_kg * r.count for r in schedule.schedule)
+        # Glass weight now uses per-pane max × panel count × opening qty
+        total_glass_weight = 0
+        total_panels = 0
+        for r in schedule.schedule:
+            if r.subdivision:
+                total_glass_weight += r.subdivision.total_glass_weight_kg * r.count
+                total_panels += r.subdivision.num_panels * r.count
+            else:
+                total_glass_weight += r.glass_pane_weight_kg * r.count
+
+        def _subdivision_dict(sub):
+            if not sub:
+                return None
+            return {
+                "configuration": sub.configuration,
+                "config_description": sub.config_description,
+                "num_panels": sub.num_panels,
+                "num_fixed": sub.num_fixed,
+                "num_sliding": sub.num_sliding,
+                "max_pane_weight_kg": sub.max_pane_weight_kg,
+                "max_pane_area_sqm": sub.max_pane_area_sqm,
+                "total_glass_area_sqm": sub.total_glass_area_sqm,
+                "total_glass_weight_kg": sub.total_glass_weight_kg,
+                "track_length_mm": sub.track_length_mm,
+                "total_frame_length_mm": sub.total_frame_length_mm,
+                "total_sash_length_mm": sub.total_sash_length_mm,
+                "total_interlock_length_mm": sub.total_interlock_length_mm,
+                "hardware_sets": sub.hardware_sets,
+                "roller_sets": sub.roller_sets,
+                "panels": [
+                    {
+                        "panel_id": p.panel_id,
+                        "panel_type": p.panel_type,
+                        "panel_index": p.panel_index,
+                        "panel_width_mm": p.panel_width_mm,
+                        "panel_height_mm": p.panel_height_mm,
+                        "glass_width_mm": p.glass_width_mm,
+                        "glass_height_mm": p.glass_height_mm,
+                        "glass_area_sqm": p.glass_area_sqm,
+                        "glass_weight_kg": p.glass_weight_kg,
+                        "requires_mechanical_handling": p.requires_mechanical_handling,
+                        "frame_lengths_mm": {
+                            "top": p.frame_top_mm, "bottom": p.frame_bottom_mm,
+                            "left": p.frame_left_mm, "right": p.frame_right_mm,
+                        } if p.panel_type == "F" else None,
+                        "sash_lengths_mm": {
+                            "top": p.sash_top_mm, "bottom": p.sash_bottom_mm,
+                            "left": p.sash_left_mm, "right": p.sash_right_mm,
+                        } if p.panel_type == "S" else None,
+                        "interlock_mm": p.interlock_mm,
+                    }
+                    for p in sub.panels
+                ],
+            }
 
         return {
             "schedule": [
@@ -713,6 +1195,8 @@ class OpeningScheduleEngine:
                     "aluminum_weight_kg": r.aluminum_weight_kg,
                     "gasket_length_lm": r.gasket_length_lm,
                     "hardware_sets": r.hardware_sets,
+                    # Panel subdivision
+                    "subdivision": _subdivision_dict(r.subdivision),
                 }
                 for r in schedule.schedule
             ],
@@ -724,6 +1208,7 @@ class OpeningScheduleEngine:
                 "total_gasket_length_lm": round(total_gasket, 2),
                 "total_hardware_sets": total_hw_sets,
                 "total_glass_weight_kg": round(total_glass_weight, 2),
+                "total_panels": total_panels,
                 "by_type": schedule.by_type,
                 "by_elevation": {k: round(v, 2) for k, v in schedule.by_elevation.items()},
                 "by_floor": {k: round(v, 2) for k, v in schedule.by_floor.items()},
