@@ -143,13 +143,13 @@ export default function CompliancePage() {
       </div>
 
       {/* Summary Flags */}
-      {report.summary_flags.length > 0 && (
+      {(report.summary_flags?.length ?? 0) > 0 && (
         <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
           <h3 className="text-amber-800 font-semibold text-sm mb-2 flex items-center gap-2">
             <AlertTriangle size={14} /> Compliance Flags ({report.summary_flags.length})
           </h3>
           <ul className="space-y-1">
-            {report.summary_flags.map((flag, i) => (
+            {(report.summary_flags || []).map((flag, i) => (
               <li key={i} className="text-amber-700 text-sm">{flag}</li>
             ))}
           </ul>
@@ -157,12 +157,12 @@ export default function CompliancePage() {
       )}
 
       {/* RFI Items */}
-      {report.rfi_items.length > 0 && (
+      {(report.rfi_items?.length ?? 0) > 0 && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
           <h3 className="text-red-800 font-semibold text-sm mb-2 flex items-center gap-2">
             <Flame size={14} /> Auto-Generated RFIs ({report.rfi_items.length})
           </h3>
-          {report.rfi_items.map((rfi, i) => (
+          {(report.rfi_items || []).map((rfi, i) => (
             <pre key={i} className="text-red-700 text-xs font-mono whitespace-pre-wrap mb-2 last:mb-0 bg-white/50 p-3 rounded border border-red-100">
               {rfi}
             </pre>
@@ -177,7 +177,7 @@ export default function CompliancePage() {
             <Wind size={16} className="text-blue-600" />
             C1 -- Structural (BS 6399-2 / L/175)
           </h2>
-          {report.structural.length === 0 ? (
+          {(report.structural?.length ?? 0) === 0 ? (
             <p className="text-slate-400 text-sm">No aluminum profiles checked (BOM may be empty)</p>
           ) : (
             <div className="overflow-x-auto">
@@ -193,7 +193,7 @@ export default function CompliancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {report.structural.map((r, i) => (
+                  {(report.structural || []).map((r, i) => (
                     <tr key={i} className="hover:bg-slate-50/50">
                       <td className="py-2 px-3 font-mono text-xs text-slate-700">{r.profile_ref}</td>
                       <td className="py-2 px-3 text-right font-mono">{r.span_mm.toFixed(0)}</td>
@@ -223,6 +223,7 @@ export default function CompliancePage() {
               <Thermometer size={14} className="text-cyan-600" />
               C2 -- Thermal / Acoustic
             </h2>
+            {report.thermal_acoustic ? (
             <div className="space-y-2 text-sm">
               {[
                 ['U-value', report.thermal_acoustic.u_value_w_m2k !== null ? `${report.thermal_acoustic.u_value_w_m2k} W/m2K` : '--'],
@@ -239,14 +240,15 @@ export default function CompliancePage() {
                 <span className="font-medium text-slate-700">Overall</span>
                 <PassBadge passed={report.thermal_acoustic.overall_passed} />
               </div>
+              {(report.thermal_acoustic.gaps?.length ?? 0) > 0 && (
+                <div className="mt-3 space-y-1">
+                  {report.thermal_acoustic.gaps.map((g, i) => (
+                    <p key={i} className="text-red-600 text-xs">Warning: {g}</p>
+                  ))}
+                </div>
+              )}
             </div>
-            {report.thermal_acoustic.gaps.length > 0 && (
-              <div className="mt-3 space-y-1">
-                {report.thermal_acoustic.gaps.map((g, i) => (
-                  <p key={i} className="text-red-600 text-xs">Warning: {g}</p>
-                ))}
-              </div>
-            )}
+            ) : <p className="text-slate-400 text-sm">No thermal/acoustic data available</p>}
           </div>
 
           {/* C3: Fire Safety */}
@@ -255,14 +257,16 @@ export default function CompliancePage() {
               <Flame size={14} className="text-orange-500" />
               C3 -- Fire & Life Safety
             </h2>
+            {report.fire_safety ? (
+            <>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-500">Building type</span>
-                <span className="capitalize text-slate-700">{report.fire_safety.building_type.replace(/_/g, ' ')}</span>
+                <span className="capitalize text-slate-700">{(report.fire_safety.building_type || '').replace(/_/g, ' ')}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Required FRL</span>
-                <span className="font-mono text-slate-700">{report.fire_safety.required_minutes} min</span>
+                <span className="font-mono text-slate-700">{report.fire_safety.required_minutes ?? '--'} min</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Provided FRL</span>
@@ -278,6 +282,8 @@ export default function CompliancePage() {
                 RFI auto-generated -- review RFI log
               </div>
             )}
+            </>
+            ) : <p className="text-slate-400 text-sm">No fire safety data available</p>}
           </div>
         </div>
       </div>

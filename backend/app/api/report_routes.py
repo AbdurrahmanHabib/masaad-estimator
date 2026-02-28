@@ -49,6 +49,111 @@ def _ensure_dir():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
+@router.get("/estimate/{estimate_id}/excel")
+async def generate_estimate_excel(
+    estimate_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Generate a per-estimate Excel workbook with Opening Schedule + BOM + Financial sheets."""
+    result = await db.execute(
+        select(Estimate).where(Estimate.id == estimate_id, Estimate.tenant_id == tenant_id)
+    )
+    estimate = result.scalar_one_or_none()
+    if not estimate:
+        raise HTTPException(status_code=404, detail=f"Estimate {estimate_id} not found")
+
+    # Extract data
+    state = estimate.state_snapshot or {}
+    bom_output = estimate.bom_output_json or {}
+    bom_items = bom_output.get("items", state.get("bom_items", []))
+    pricing = bom_output.get("summary", state.get("pricing_data", {}))
+    opening_schedule = estimate.opening_schedule_json or state.get("opening_schedule", {})
+    scope = estimate.project_scope_json or state.get("project_scope", {})
+
+    openings = []
+    if isinstance(opening_schedule, dict):
+        openings = opening_schedule.get("openings", opening_schedule.get("items", []))
+    elif isinstance(opening_schedule, list):
+        openings = opening_schedule
+
+    # Project name
+    project_name = f"Project {estimate_id[:8]}"
+    if estimate.project_id:
+        proj_result = await db.execute(select(Project).where(Project.id == estimate.project_id))
+        project = proj_result.scalar_one_or_none()
+        if project:
+            project_name = project.name or project_name
+
+    _ensure_dir()
+    filename = f"Estimate_{estimate_id[:8]}.xlsx"
+    path = os.path.join(DOWNLOAD_DIR, filename)
+
+    try:
+        import xlsxwriter
+        wb = xlsxwriter.Workbook(path)
+        bold = wb.add_format({"bold": True})
+        money = wb.add_format({"num_format": "#,##0.00"})
+
+        # Sheet 1: Opening Schedule
+        ws1 = wb.add_worksheet("Opening Schedule")
+        headers = ["Item Code", "System Type", "Width (mm)", "Height (mm)", "Qty", "Area (sqm)", "Floor", "Elevation", "Glass Type"]
+        for c, h in enumerate(headers):
+            ws1.write(0, c, h, bold)
+        for r, op in enumerate(openings, 1):
+            w = op.get("width_mm", 0)
+            h_val = op.get("height_mm", 0)
+            qty = op.get("quantity", 1)
+            area = round((w / 1000) * (h_val / 1000) * qty, 2) if w and h_val else 0
+            ws1.write(r, 0, op.get("mark_id", op.get("id", op.get("item_code", ""))))
+            ws1.write(r, 1, op.get("system_type", ""))
+            ws1.write(r, 2, w)
+            ws1.write(r, 3, h_val)
+            ws1.write(r, 4, qty)
+            ws1.write(r, 5, area)
+            ws1.write(r, 6, op.get("floor", ""))
+            ws1.write(r, 7, op.get("elevation", ""))
+            ws1.write(r, 8, op.get("glass_type", ""))
+
+        # Sheet 2: BOM
+        ws2 = wb.add_worksheet("Bill of Quantities")
+        bom_headers = ["Category", "Description", "Qty", "Unit", "Unit Cost", "Subtotal"]
+        for c, h in enumerate(bom_headers):
+            ws2.write(0, c, h, bold)
+        for r, item in enumerate(bom_items, 1):
+            ws2.write(r, 0, item.get("category", ""))
+            ws2.write(r, 1, item.get("description", ""))
+            ws2.write(r, 2, item.get("quantity", 0))
+            ws2.write(r, 3, item.get("unit", ""))
+            ws2.write(r, 4, float(item.get("unit_cost_aed", 0)), money)
+            ws2.write(r, 5, float(item.get("subtotal_aed", 0)), money)
+
+        # Sheet 3: Financial Summary
+        ws3 = wb.add_worksheet("Financial Summary")
+        ws3.write(0, 0, "Project", bold)
+        ws3.write(0, 1, project_name)
+        ws3.write(1, 0, "Estimate ID", bold)
+        ws3.write(1, 1, estimate_id[:8])
+        fin_rows = [
+            ("Material Cost", float(pricing.get("material_cost_aed", 0))),
+            ("Labor Cost", float(pricing.get("labor_cost_aed", 0))),
+            ("Site Cost", float(pricing.get("site_cost_aed", 0))),
+            ("Overhead", float(pricing.get("overhead_aed", 0))),
+            ("Margin", float(pricing.get("margin_aed", 0))),
+            ("Total (excl VAT)", float(pricing.get("total_aed", 0))),
+        ]
+        for r, (label, val) in enumerate(fin_rows, 3):
+            ws3.write(r, 0, label, bold)
+            ws3.write(r, 1, val, money)
+
+        wb.close()
+        return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=filename)
+    except Exception as e:
+        logger.error(f"Estimate Excel generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Excel generation failed: {e}")
+
+
 @router.get("/estimate/{estimate_id}/pdf")
 async def generate_estimate_pdf(
     estimate_id: str,
