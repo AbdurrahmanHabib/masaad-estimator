@@ -64,6 +64,14 @@ async def init_db():
             _migrations = [
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS client_name VARCHAR(255)",
                 "ALTER TABLE projects ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Active'",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS location_zone VARCHAR(100)",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS project_country VARCHAR(100) DEFAULT 'UAE'",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_international BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS consultant_name VARCHAR(255)",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS contract_type VARCHAR(50) DEFAULT 'Supply + Fabricate + Install'",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS execution_strategy VARCHAR(30) DEFAULT 'IN_HOUSE_INSTALL'",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS complexity_multiplier NUMERIC(4,2) DEFAULT 1.0",
+                "ALTER TABLE projects ADD COLUMN IF NOT EXISTS scope_boundary VARCHAR(100) DEFAULT 'Panels + Substructure'",
                 # Tenant columns added after initial schema
                 "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS company_name VARCHAR(255) DEFAULT 'Madinat Al Saada'",
                 "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS theme_color_hex VARCHAR(10) DEFAULT '#002147'",
